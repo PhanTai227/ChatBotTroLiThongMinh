@@ -1,0 +1,14 @@
+# Cấu hình phần mềm dùng trong kiểm tra mã nguồn
+line-length = 120
+target-version = "py313"
+
+[lint]
+select = ["E", "F", "W", "I", "B", "UP", "C4", "SIM"]
+ignore = [
+    "B008",   # FastAPI dùng Depends() trong tham số mặc định là cách chuẩn
+    "SIM108", # if/else đơn giản dễ đọc hơn toán tử ba ngôi
+]
+
+[lint.per-file-ignores]
+# Kiểm thử phải đặt biến môi trường trước khi import ứng dụng.
+"tests/conftest.py" = ["E402"]
