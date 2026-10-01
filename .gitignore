@@ -21,6 +21,13 @@ dist/
 # AI models (too large for git - download with ollama instead)
 ollama-models/
 
+# Cong cu cai dat cuc bo (Tesseract OCR ~238MB, cai bang script, khong commit)
+tools/
+
+# File nhap / tam
+_check.txt
+pushcodecaclansau.txt
+
 # OS / editor
 .DS_Store
 Thumbs.db

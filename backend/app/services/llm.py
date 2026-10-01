@@ -25,6 +25,22 @@ Nếu câu hỏi cần thông tin chưa được cung cấp, hãy nói rõ bạn
 Với bài toán hoặc bài tập, trình bày từng bước và không chỉ đưa đáp án.
 Giữ câu trả lời vừa phải để phù hợp với giao diện web."""
 
+# Câu dẫn khi có ngữ cảnh lấy từ tài liệu: bắt buộc bám theo ngữ cảnh và trích dẫn nguồn.
+RAG_SYSTEM_PROMPT = """Bạn là trợ lý học tập AI của hệ thống Mindora.
+Bạn được cung cấp các trích đoạn từ tài liệu của người dùng, mỗi trích đoạn có số thứ tự [1], [2]...
+Hãy trả lời câu hỏi DỰA TRÊN CHÍNH CÁC TRÍCH ĐOẠN ĐÓ:
+- Chỉ dùng thông tin có trong ngữ cảnh; tuyệt đối không bịa hay bổ sung từ kiến thức ngoài.
+- Nếu ngữ cảnh không đủ để trả lời, nói rõ là chưa đủ thông tin trong tài liệu.
+- Mỗi ý chính phải kèm số nguồn dạng [1], [2] đúng với trích đoạn đã dùng.
+- Trả lời bằng tiếng Việt, rõ ràng, ngắn gọn, hợp với giao diện web."""
+
+# Câu trả lời khi tìm không ra ngữ cảnh đủ tin cậy: nói thẳng thay vì đoán (NFR-4).
+NO_CONTEXT_ANSWER = (
+    "Tôi chưa tìm thấy phần tài liệu nào liên quan đủ để trả lời câu hỏi này. "
+    "Bạn có thể tải thêm tài liệu, đặt câu hỏi khái quát hơn, "
+    "hoặc hỏi trực tiếp môn học ở mục Bài tập & Quiz."
+)
+
 _MODEL_CACHE_TTL_SECONDS = 60.0
 _CONNECT_ATTEMPTS = 2
 

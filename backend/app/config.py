@@ -118,6 +118,19 @@ class Settings:
     max_attempts: int = 3
     allowed_upload_types: tuple[str, ...] = (".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg")
 
+    # --- RAG: vector nhúng và tìm kiếm ngữ nghĩa ---
+    # Model embedding chạy cũng qua Ollama nên không thêm phụ thuộc nặng cho máy cục bộ.
+    embedding_model: str = "nomic-embed-text"
+    # Số chiều của vector. nomic-embed-text = 768, bge-m3 = 1024. Chỉ dùng để kiểm tra
+    # khi đọc lại vector đã lưu nên đổi model phải sinh lại vector của các tài liệu cũ.
+    embedding_dim: int = 768
+    embedding_batch_size: int = 16
+    rag_top_k: int = 6
+    # Ngưỡng điểm tương đồng: dưới ngưỡng này coi như không có ngữ cảnh để chống ảo giác (NFR-4).
+    rag_min_score: float = 0.35
+    # Số ký tự của mỗi đoạn được đưa vào ngữ cảnh câu hỏi.
+    rag_context_chars: int = 6_000
+
     log_level: str = "INFO"
     log_to_file: bool = True
     log_dir: Path = field(default_factory=Path)
@@ -141,6 +154,16 @@ class Settings:
             raise ValueError("CHUNK_OVERLAP phải từ 0 trở lên và nhỏ hơn CHUNK_SIZE.")
         if not self.allowed_upload_types:
             raise ValueError("ALLOWED_UPLOAD_TYPES không được để trống.")
+        if self.embedding_dim < 8:
+            raise ValueError("EMBEDDING_DIM phải từ 8 trở lên.")
+        if self.embedding_batch_size < 1:
+            raise ValueError("EMBEDDING_BATCH_SIZE phải từ 1 trở lên.")
+        if not 1 <= self.rag_top_k <= 50:
+            raise ValueError("RAG_TOP_K phải từ 1 đến 50.")
+        if not -1.0 <= self.rag_min_score <= 1.0:
+            raise ValueError("RAG_MIN_SCORE phải nằm trong khoảng -1.0 đến 1.0.")
+        if self.rag_context_chars < 500:
+            raise ValueError("RAG_CONTEXT_CHARS phải từ 500 trở lên.")
 
 
 @lru_cache(maxsize=1)
@@ -178,6 +201,12 @@ def get_settings() -> Settings:
         chunk_size=_int_env("CHUNK_SIZE", 800),
         chunk_overlap=_int_env("CHUNK_OVERLAP", 120),
         max_attempts=_int_env("MAX_ATTEMPTS", 3),
+        embedding_model=_str_env("EMBEDDING_MODEL", "nomic-embed-text"),
+        embedding_dim=_int_env("EMBEDDING_DIM", 768),
+        embedding_batch_size=_int_env("EMBEDDING_BATCH_SIZE", 16),
+        rag_top_k=_int_env("RAG_TOP_K", 6),
+        rag_min_score=_float_env("RAG_MIN_SCORE", 0.35),
+        rag_context_chars=_int_env("RAG_CONTEXT_CHARS", 6_000),
         allowed_upload_types=_list_env(
             "ALLOWED_UPLOAD_TYPES", (".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg")
         ),

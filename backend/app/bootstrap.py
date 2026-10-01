@@ -68,5 +68,14 @@ def bootstrap() -> list[str]:
     if migrated:
         logger.info("Đã gán chủ cho %d hội thoại cũ.", migrated)
     storage.ensure_storage_dirs()
-    documents_service.recover_on_startup()
+    return applied
+
+
+async def bootstrap_async() -> list[str]:
+    """Khởi tạo rồi xử lý tiếp các việc tài liệu bị kẹt từ lần chạy trước.
+
+    Việc này cần mạng cục bộ (Ollama) nên chạy sau khi phần CSDL đã sẵn sàng.
+    """
+    applied = bootstrap()
+    await documents_service.recover_on_startup()
     return applied

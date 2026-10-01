@@ -31,7 +31,12 @@ from fastapi.testclient import TestClient
 
 from app import config
 from app.main import app as fastapi_app
-from app.services import llm
+from app.services import embeddings, llm
+
+# Lưu hàm gốc trước khi fixture autouse thay bằng bản giả, để kiểm thử riêng
+# của dịch vụ embedding vẫn gọi được logic thật.
+REAL_EMBED_TEXTS = embeddings.embed_texts
+REAL_EMBED_QUERY = embeddings.embed_query
 
 ADMIN_EMAIL = "admin@mindora.local"
 ADMIN_PASSWORD = "Admin@123"
@@ -53,8 +58,73 @@ def client() -> Iterator[TestClient]:
 def _reset_caches() -> Iterator[None]:
     config.reset_settings_cache()
     llm.invalidate_caches()
+    embeddings.invalidate_caches()
     yield
     llm.invalidate_caches()
+    embeddings.invalidate_caches()
+
+
+class FakeEmbedder:
+    """Sinh vector giả lập để kiểm thử RAG không phụ thuộc Ollama thật.
+
+    Cách làm: mỗi văn bản được biểu diễn bằng vector dựa trên các từ khoá có trong nó.
+    Hai văn bản có chung từ khoá sẽ có điểm tương đồng dương, đủ để kiểm tra
+    việc lọc theo ngưỡng, xếp hạng top-k và phạm vi tài liệu.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    @property
+    def dim(self) -> int:
+        # Phải khớp EMBEDDING_DIM thật, nếu không kho vector sẽ từ chối vector này.
+        return config.get_settings().embedding_dim
+
+    def _vector_for(self, text: str) -> list[float]:
+        lowered = text.lower()
+        vector = [0.0] * self.dim
+        for token, index in _KEYWORDS.items():
+            if token in lowered and index < self.dim:
+                vector[index] = 1.0
+        if not any(vector):
+            # Dùng chiều dành riêng cho văn bản không có từ khoá nào, để vector đó
+            # trực giao với mọi văn bản khác và không bao giờ khớp ngữ cảnh.
+            vector[min(len(_KEYWORDS), self.dim - 1)] = 1.0
+        return embeddings.normalize(vector)
+
+    async def embed_query(self, text: str) -> list[float]:
+        self.calls.append([text])
+        return self._vector_for(text)
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        self.calls.append(list(texts))
+        return [self._vector_for(text) for text in texts]
+
+
+# Từ khoá tiếng Việt dùng để tạo vector giả, mỗi từ chiếm một chiều riêng.
+_KEYWORDS: dict[str, int] = {
+    "gradient": 0,
+    "descent": 1,
+    "máy học": 2,
+    "học tập": 3,
+    "toán rời rạc": 4,
+    "mạng nơ-ron": 5,
+    "đạo hàm": 6,
+    "tối ưu": 7,
+}
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    return FakeEmbedder()
+
+
+@pytest.fixture(autouse=True)
+def _use_fake_embedder(monkeypatch: pytest.MonkeyPatch, fake_embedder: FakeEmbedder) -> None:
+    """Mặc định mọi kiểm thử dùng vector giả, trừ kiểm thử riêng của dịch vụ embedding."""
+    # retrieval gọi embeddings.embed_query nên chỉ cần gắn tại một chỗ là đủ.
+    monkeypatch.setattr(embeddings, "embed_query", fake_embedder.embed_query)
+    monkeypatch.setattr(embeddings, "embed_texts", fake_embedder.embed_texts)
 
 
 @pytest.fixture(scope="session")

@@ -175,9 +175,15 @@ def delete_document(document_id: int) -> None:
         connection.execute("DELETE FROM documents WHERE id = ?", (document_id,))
 
 
-def list_by_status(status: str) -> list[dict]:
+def list_by_status(status: str, owner_id: int | None = None) -> list[dict]:
+    """Tài liệu theo trạng thái; có owner_id thì giới hạn cho một người dùng."""
+    where = "status = ?"
+    params: list[object] = [status]
+    if owner_id is not None:
+        where += " AND owner_id = ?"
+        params.append(owner_id)
     with read_connection() as connection:
         rows = connection.execute(
-            f"SELECT {_COLUMNS} FROM documents WHERE status = ? ORDER BY updated_at ASC", (status,)
+            f"SELECT {_COLUMNS} FROM documents WHERE {where} ORDER BY updated_at ASC", params
         ).fetchall()
     return [_row_to_dict(row) for row in rows]

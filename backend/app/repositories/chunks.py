@@ -33,6 +33,27 @@ def count_for_document(document_id: int) -> int:
         )
 
 
+def set_vector_refs(document_id: int, refs: dict[int, str]) -> int:
+    """Gán vector_ref cho từng chunk theo chunk_index. Trả về số chunk được gán."""
+    if not refs:
+        return 0
+    with transaction() as connection:
+        connection.executemany(
+            "UPDATE chunks SET vector_ref = ? WHERE document_id = ? AND chunk_index = ?",
+            [(ref, document_id, index) for index, ref in refs.items()],
+        )
+    return len(refs)
+
+
+def list_pending_vector_refs(document_id: int) -> list[sqlite3.Row]:
+    """Các chunk chưa có vector, dùng để sinh lại vector mà không cần trích xuất lại."""
+    with read_connection() as connection:
+        return connection.execute(
+            f"SELECT {_COLUMNS} FROM chunks WHERE document_id = ? AND vector_ref IS NULL ORDER BY chunk_index",
+            (document_id,),
+        ).fetchall()
+
+
 def list_for_document(document_id: int, limit: int = 200, offset: int = 0) -> list[dict]:
     with read_connection() as connection:
         rows = connection.execute(
@@ -40,6 +61,15 @@ def list_for_document(document_id: int, limit: int = 200, offset: int = 0) -> li
             (document_id, limit, offset),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def get_by_index(document_id: int, chunk_index: int) -> sqlite3.Row | None:
+    """Lấy đúng một chunk theo thứ tự trong tài liệu (dùng khi tra vector)."""
+    with read_connection() as connection:
+        return connection.execute(
+            f"SELECT {_COLUMNS} FROM chunks WHERE document_id = ? AND chunk_index = ?",
+            (document_id, chunk_index),
+        ).fetchone()
 
 
 def get_by_ids(chunk_ids: list[int]) -> list[sqlite3.Row]:

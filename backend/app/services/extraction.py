@@ -82,16 +82,39 @@ def ocr_languages() -> frozenset[str]:
     return frozenset(line.strip() for line in result.stdout.splitlines()[1:] if line.strip())
 
 
+def configured_languages() -> list[str]:
+    """Danh sách ngôn ngữ theo cấu hình, ví dụ "vie+eng" -> ["vie", "eng"]."""
+    return [code for code in get_settings().tesseract_lang.split("+") if code]
+
+
+@lru_cache(maxsize=1)
+def effective_languages() -> tuple[str, ...]:
+    """Ngôn ngữ OCR thực sự dùng được: chỉ lấy những gói đã cài trên máy.
+
+    Nhờ vậy khi thiếu gói tiếng Việt, hệ thống vẫn OCR được phần chữ Latinh
+    thay vì báo lỗi cứng và làm hỏng cả tài liệu.
+    """
+    installed = ocr_languages()
+    usable = [code for code in configured_languages() if code in installed]
+    if usable:
+        return tuple(usable)
+    if "eng" in installed:
+        return ("eng",)
+    return ()
+
+
 def ocr_status() -> dict:
     """Thông tin OCR dùng cho endpoint kiểm tra tình trạng."""
     command = find_tesseract()
-    languages = sorted(ocr_languages())
-    required = [code for code in get_settings().tesseract_lang.split("+") if code]
-    missing = [code for code in required if code not in languages]
+    installed = sorted(ocr_languages())
+    required = configured_languages()
+    missing = [code for code in required if code not in installed]
     return {
         "available": command is not None,
         "command": command,
-        "languages": languages,
+        "languages": installed,
+        "required_languages": required,
+        "effective_languages": list(effective_languages()),
         "missing_languages": missing,
     }
 
@@ -106,9 +129,27 @@ def _ocr_image_file(image_path: Path) -> str:
     command = find_tesseract()
     if command:
         pytesseract.pytesseract.tesseract_cmd = command
-    settings = get_settings()
+    languages = effective_languages()
+    if not languages:
+        raise MissingDependency(
+            "Tesseract chưa có gói ngôn ngữ nào (cần ít nhất eng hoặc vie)."
+        )
     with Image.open(image_path) as image:
-        return pytesseract.image_to_string(image, lang=settings.tesseract_lang)
+        return pytesseract.image_to_string(image, lang="+".join(languages))
+
+
+def _ocr_warnings(status: dict) -> list[str]:
+    """Cảnh báo dễ hiểu cho người dùng khi chất lượng OCR có thể bị giới hạn."""
+    warnings: list[str] = []
+    if status["missing_languages"]:
+        warnings.append(
+            "Thiếu gói ngôn ngữ Tesseract: " + ", ".join(status["missing_languages"]) + "."
+        )
+    required = status["required_languages"]
+    effective = status["effective_languages"]
+    if effective and "vie" in required and "vie" not in effective:
+        warnings.append("Chưa có gói tiếng Việt nên chất lượng OCR tiếng Việt sẽ thấp.")
+    return warnings
 
 
 def _pdf_text_pages(path: Path) -> list[tuple[int, str]]:
@@ -177,14 +218,10 @@ def extract_pdf(path: Path) -> ExtractionResult:
         else:
             enriched.append((page_number, text))
 
-    if status["missing_languages"]:
-        warnings.append(
-            "Thiếu gói ngôn ngữ Tesseract: " + ", ".join(status["missing_languages"]) + "."
-        )
     if not status["available"]:
         warnings.append("Chưa cài Tesseract nên trang dạng scan không đọc được.")
-    if method == "text+ocr" and status["missing_languages"]:
-        warnings.append("Kết quả OCR có thể chưa chính xác do thiếu gói ngôn ngữ.")
+    else:
+        warnings.extend(_ocr_warnings(status))
     return ExtractionResult(pages=enriched, page_count=len(pages), method=method, warnings=warnings)
 
 
@@ -243,9 +280,7 @@ def extract_image(path: Path) -> ExtractionResult:
         raise
     except Exception as exc:
         raise ExtractionError(f"Không đọc được ảnh: {exc}") from exc
-    warnings = []
-    if status["missing_languages"]:
-        warnings.append("Thiếu gói ngôn ngữ Tesseract: " + ", ".join(status["missing_languages"]) + ".")
+    warnings = _ocr_warnings(status)
     return ExtractionResult(
         pages=[(1, text)],
         page_count=1,

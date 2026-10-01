@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .bootstrap import bootstrap
+from .bootstrap import bootstrap_async
 from .config import get_settings
 from .errors import register_exception_handlers
 from .observability import configure_logging, register_request_logging
@@ -26,7 +26,7 @@ from .routers import admin, auth, chat, documents
 async def lifespan(_: FastAPI):
     """Chuẩn bị cơ sở dữ liệu và nhật ký trước khi phục vụ yêu cầu."""
     configure_logging()
-    bootstrap()
+    await bootstrap_async()
     yield
 
 

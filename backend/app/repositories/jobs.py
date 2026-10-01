@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from ..db import read_connection, transaction
 
 STAGE_OCR = "ocr"
+STAGE_EMBEDDING = "embedding"
 
 
 def _now() -> datetime:

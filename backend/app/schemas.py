@@ -41,9 +41,22 @@ class DocumentUpdate(BaseModel):
     chapter_tag: str | None = Field(default=None, max_length=150)
 
 
+class Citation(BaseModel):
+    """Nguồn trích dẫn cho câu trả lời, từ đoạn tài liệu tìm được."""
+
+    document_id: int
+    chunk_id: int
+    file_name: str
+    page_number: int | None = None
+    snippet: str
+    score: float
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: int | None = None
+    # Giới hạn câu hỏi trong một tài liệu cụ thể; bỏ trống thì tìm trong tất cả tài liệu của tôi.
+    document_id: int | None = None
 
     @field_validator("message")
     @classmethod
@@ -58,3 +71,7 @@ class ChatResponse(BaseModel):
     answer: str
     conversation_id: int
     model: str
+    # Rỗng khi câu trả lời không dựa trên ngữ cảnh tài liệu nào (chống ảo giác NFR-4).
+    citations: list[Citation] = Field(default_factory=list)
+    # True khi câu trả lời có dùng ngữ cảnh trích từ tài liệu của người dùng.
+    used_documents: bool = False
