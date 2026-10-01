@@ -108,10 +108,21 @@ class Settings:
 
     cors_origins: tuple[str, ...] = ("http://127.0.0.1:5173", "http://localhost:5173")
 
+    # --- Tài liệu và OCR ---
+    # Đường dẫn tesseract.exe; để trống thì tự dò trong các vị trí thông dụng.
+    tesseract_cmd: str = ""
+    tesseract_lang: str = "vie+eng"
+    ocr_dpi: int = 200
+    chunk_size: int = 800
+    chunk_overlap: int = 120
+    max_attempts: int = 3
+    allowed_upload_types: tuple[str, ...] = (".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg")
+
     log_level: str = "INFO"
     log_to_file: bool = True
     log_dir: Path = field(default_factory=Path)
     storage_dir: Path = field(default_factory=Path)
+    upload_tmp_dir: Path = field(default_factory=Path)
 
     def validate(self) -> None:
         if self.app_mode not in VALID_APP_MODES:
@@ -124,6 +135,12 @@ class Settings:
             raise ValueError("MODEL_NUM_CTX phải từ 2048 trở lên để RAG không bị cắt ngữ cảnh.")
         if self.session_days < 1:
             raise ValueError("SESSION_DAYS phải từ 1 trở lên.")
+        if self.chunk_size < 100:
+            raise ValueError("CHUNK_SIZE phải từ 100 trỏ lên.")
+        if not 0 <= self.chunk_overlap < self.chunk_size:
+            raise ValueError("CHUNK_OVERLAP phải từ 0 trở lên và nhỏ hơn CHUNK_SIZE.")
+        if not self.allowed_upload_types:
+            raise ValueError("ALLOWED_UPLOAD_TYPES không được để trống.")
 
 
 @lru_cache(maxsize=1)
@@ -155,10 +172,20 @@ def get_settings() -> Settings:
         default_admin_password=_str_env("DEFAULT_ADMIN_PASSWORD", "Admin@123"),
         default_max_upload_mb=_int_env("DEFAULT_MAX_UPLOAD_MB", 20),
         cors_origins=_list_env("CORS_ORIGINS", ("http://127.0.0.1:5173", "http://localhost:5173")),
+        tesseract_cmd=_str_env("TESSERACT_CMD", ""),
+        tesseract_lang=_str_env("TESSERACT_LANG", "vie+eng"),
+        ocr_dpi=_int_env("OCR_DPI", 200),
+        chunk_size=_int_env("CHUNK_SIZE", 800),
+        chunk_overlap=_int_env("CHUNK_OVERLAP", 120),
+        max_attempts=_int_env("MAX_ATTEMPTS", 3),
+        allowed_upload_types=_list_env(
+            "ALLOWED_UPLOAD_TYPES", (".pdf", ".docx", ".xlsx", ".png", ".jpg", ".jpeg")
+        ),
         log_level=_str_env("LOG_LEVEL", "INFO").upper(),
         log_to_file=_bool_env("LOG_TO_FILE", True),
         log_dir=Path(_str_env("LOG_DIR", str(BACKEND_DIR / "logs"))),
         storage_dir=Path(_str_env("STORAGE_DIR", str(APP_DIR / "storage"))),
+        upload_tmp_dir=Path(_str_env("UPLOAD_TMP_DIR", str(APP_DIR / "storage" / "tmp"))),
     )
     settings.validate()
     return settings

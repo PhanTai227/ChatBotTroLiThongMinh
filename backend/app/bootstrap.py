@@ -9,6 +9,8 @@ from .config import get_settings
 from .db import run_migrations, transaction
 from .repositories import settings_repo
 from .security import hash_password
+from .services import documents as documents_service
+from .services import storage
 
 logger = logging.getLogger("mindora.bootstrap")
 
@@ -65,4 +67,6 @@ def bootstrap() -> list[str]:
         logger.info("Đã áp dụng migration: %s", ", ".join(applied))
     if migrated:
         logger.info("Đã gán chủ cho %d hội thoại cũ.", migrated)
+    storage.ensure_storage_dirs()
+    documents_service.recover_on_startup()
     return applied

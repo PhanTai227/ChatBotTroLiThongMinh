@@ -19,6 +19,8 @@ if str(BACKEND_DIR) not in sys.path:
 
 _TMP_DIR = Path(tempfile.mkdtemp(prefix="mindora-test-"))
 os.environ["DATABASE_PATH"] = str(_TMP_DIR / "test.db")
+os.environ["STORAGE_DIR"] = str(_TMP_DIR / "storage")
+os.environ["UPLOAD_TMP_DIR"] = str(_TMP_DIR / "storage" / "tmp")
 os.environ["LOG_TO_FILE"] = "false"
 os.environ["LLM_TIMEOUT_SECONDS"] = "5"
 os.environ["HEALTH_TIMEOUT_SECONDS"] = "1"
@@ -84,3 +86,66 @@ def make_user(client: TestClient):
 
 def auth_header(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def docx_factory():
+    """Tạo tệp DOCX hợp lệ với tiêu đề tuỳ ý, dùng để sinh dữ liệu kiểm thử."""
+    import io
+
+    import docx
+
+    def _make(title: str, paragraphs: int = 5) -> bytes:
+        document = docx.Document()
+        document.add_heading(title, level=1)
+        for index in range(1, paragraphs + 1):
+            document.add_paragraph(
+                f"Muc {index}. Gradient descent la thuat toan toi uu ham mat sat theo huong giam dan. "
+                f"Noi dung muc {index} cua {title}."
+            )
+        buffer = io.BytesIO()
+        document.save(buffer)
+        return buffer.getvalue()
+
+    return _make
+
+
+@pytest.fixture
+def sample_docx(docx_factory) -> bytes:
+    return docx_factory("Giáo trình Trí tuệ nhân tạo")
+
+
+@pytest.fixture
+def sample_pdf() -> bytes:
+    """Tạo một tệp PDF hợp lệ có lớp chữ để kiểm thử trích xuất."""
+    import fitz
+
+    document = fitz.open()
+    for page_index in range(2):
+        page = document.new_page()
+        page.insert_text((72, 100), f"Trang {page_index + 1}: noi dung bai giang ve hoc tap.")
+        page.insert_text((72, 130), "Gradient descent toi uu hoa ham mat sat bang buoc lap.")
+    payload = document.tobytes()
+    document.close()
+    return payload
+
+
+@pytest.fixture
+def upload(client: TestClient):
+    """Hàm tiện ích tải tệp lên và trả về (status_code, body)."""
+
+    def _upload(
+        token: str,
+        content: bytes,
+        filename: str = "tai-lieu.pdf",
+        content_type: str = "application/pdf",
+        **fields: str,
+    ):
+        return client.post(
+            "/api/documents",
+            files={"file": (filename, content, content_type)},
+            data=fields or None,
+            headers=auth_header(token),
+        )
+
+    return _upload

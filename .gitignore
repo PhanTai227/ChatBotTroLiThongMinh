@@ -7,12 +7,16 @@ venv/
 *.db
 *.sqlite3
 
+# Dữ liệu sinh khi chạy (tài liệu tải lên, vector, nhật ký)
+backend/app/storage/
+backend/logs/
+*.log
+
 # Node / frontend
 node_modules/
 dist/
 .vite/
 *.local
-*.log
 
 # AI models (too large for git - download with ollama instead)
 ollama-models/

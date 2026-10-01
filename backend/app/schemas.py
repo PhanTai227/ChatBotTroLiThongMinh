@@ -35,6 +35,12 @@ class SettingRequest(BaseModel):
     value: str = Field(min_length=1, max_length=100)
 
 
+class DocumentUpdate(BaseModel):
+    file_name: str | None = Field(default=None, min_length=1, max_length=255)
+    subject_tag: str | None = Field(default=None, max_length=100)
+    chapter_tag: str | None = Field(default=None, max_length=150)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: int | None = None

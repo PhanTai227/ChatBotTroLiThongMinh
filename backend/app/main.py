@@ -19,7 +19,7 @@ from .bootstrap import bootstrap
 from .config import get_settings
 from .errors import register_exception_handlers
 from .observability import configure_logging, register_request_logging
-from .routers import admin, auth, chat
+from .routers import admin, auth, chat, documents
 
 
 @asynccontextmanager
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
     application.include_router(auth.router)
     application.include_router(admin.router)
     application.include_router(chat.router)
+    application.include_router(documents.router)
     return application
 
 
