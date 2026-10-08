@@ -93,7 +93,7 @@ def test_stats_reflect_data(client: TestClient, admin_token: str, make_user) -> 
     response = client.get("/api/admin/stats", headers=auth_header(admin_token))
     assert response.status_code == 200
     stats = response.json()
-    assert set(stats) == {"users", "active_users", "conversations", "questions"}
+    assert set(stats) == {"users", "active_users", "conversations", "questions", "feedback_new"}
     assert stats["users"] >= 2
 
 
@@ -108,3 +108,43 @@ def test_audit_log_records_admin_actions(client: TestClient, admin_token: str, m
             (user_id,),
         ).fetchone()
     assert int(rows[0]) >= 1
+
+
+def test_admin_views_user_question_history(
+    client: TestClient, admin_token: str, make_user, monkeypatch
+) -> None:
+    """Quản trị viên xem được toàn bộ hội thoại và tin nhắn của một học viên."""
+    from .test_chat import FakeProvider, use_provider
+
+    use_provider(monkeypatch, FakeProvider())
+    token, user_id = make_user()
+    question = client.post(
+        "/api/chat",
+        json={"message": "Gradient descent là gì?"},
+        headers=auth_header(token),
+    ).json()
+
+    response = client.get(
+        f"/api/admin/users/{user_id}/history", headers=auth_header(admin_token)
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"]["id"] == user_id
+    assert len(body["conversations"]) >= 1
+    conversation = next(
+        item for item in body["conversations"] if item["id"] == question["conversation_id"]
+    )
+    roles = [message["role"] for message in conversation["messages"]]
+    assert roles == ["user", "assistant"]
+    assert conversation["messages"][0]["content"] == "Gradient descent là gì?"
+
+
+def test_regular_user_cannot_view_history(client: TestClient, make_user) -> None:
+    token, user_id = make_user()
+    response = client.get(f"/api/admin/users/{user_id}/history", headers=auth_header(token))
+    assert response.status_code == 403
+
+
+def test_admin_history_of_missing_user_is_404(client: TestClient, admin_token: str) -> None:
+    response = client.get("/api/admin/users/999999/history", headers=auth_header(admin_token))
+    assert response.status_code == 404

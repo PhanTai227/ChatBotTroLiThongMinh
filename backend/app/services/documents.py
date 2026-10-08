@@ -41,6 +41,25 @@ def document_path(storage_path: str) -> Path:
     return storage.resolve_stored_path(storage_path)
 
 
+def build_document_context(document_id: int, limit_chars: int) -> str:
+    """Ghép nội dung các đoạn của tài liệu thành khối ngữ cảnh (dùng cho tóm tắt và sinh quiz).
+
+    Chỉ lấy tối đa `limit_chars` ký tự để prompt luôn nằm trong cửa sổ ngữ cảnh của LLM.
+    """
+    blocks: list[str] = []
+    used = 0
+    for chunk in chunks_repo.list_for_document(document_id, limit=300):
+        text = str(chunk["content"]).strip()
+        if not text:
+            continue
+        block = f"[{chunk['chunk_index'] + 1}] {text}"
+        if used + len(block) > limit_chars:
+            break
+        blocks.append(block)
+        used += len(block)
+    return "\n\n".join(blocks)
+
+
 def process_document(document_id: int) -> PipelineOutcome:
     """Trích xuất và chia đoạn một tài liệu. Ném lỗi nếu không đọc được nội dung."""
     document = documents_repo.get_by_id(document_id)

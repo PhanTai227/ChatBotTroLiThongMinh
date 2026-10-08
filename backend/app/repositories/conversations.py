@@ -81,6 +81,16 @@ class ConversationNotFound(Exception):
     """Không tìm thấy hội thoại hoặc người dùng không có quyền truy cập."""
 
 
+def delete_conversation(conversation_id: int, user_id: int) -> bool:
+    """Xoá hội thoại của chính người dùng. Trả về False nếu không tìm thấy."""
+    with transaction() as connection:
+        cursor = connection.execute(
+            "DELETE FROM conversations WHERE id = ? AND (user_id = ? OR user_id IS NULL)",
+            (conversation_id, user_id),
+        )
+        return bool(cursor.rowcount)
+
+
 def start_turn(user_id: int, message: str, conversation_id: int | None) -> int:
     """Mở lượt hỏi đáp: tạo hội thoại nếu cần và lưu câu hỏi, trong cùng một transaction.
 

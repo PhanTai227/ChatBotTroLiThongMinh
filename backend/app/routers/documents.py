@@ -25,9 +25,12 @@ from ..repositories import chunks as chunks_repo
 from ..repositories import documents as documents_repo
 from ..repositories import jobs as jobs_repo
 from ..repositories import settings_repo
+from ..repositories import summaries as summaries_repo
 from ..schemas import DocumentUpdate
 from ..services import documents as documents_service
 from ..services import storage
+from ..services import summaries as summaries_service
+from ..services.llm import LLMEmptyResponse, LLMModelMissing, LLMTimeout, LLMUnavailable
 
 logger = logging.getLogger("mindora.api.documents")
 router = APIRouter(prefix="/api/documents", tags=["Tài liệu"])
@@ -202,6 +205,45 @@ async def document_chunks(
     _owned_document(document_id, int(user["id"]))
     items = chunks_repo.list_for_document(document_id, limit=limit, offset=offset)
     return {"items": items, "total": chunks_repo.count_for_document(document_id)}
+
+
+@router.get("/{document_id}/summary")
+async def document_summary(
+    document_id: int, request: Request, authorization: str | None = Header(default=None)
+) -> dict:
+    """Tóm tắt tài liệu (Module C, FR-B5). Sinh một lần rồi lưu để chỉ tốn một lượt LLM."""
+    user = get_current_user(request, authorization)
+    document = _owned_document(document_id, int(user["id"]))
+    if document["status"] != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tài liệu chưa sẵn sàng để tóm tắt. Hãy chờ xử lý xong rồi thử lại.",
+        )
+    cached = summaries_repo.get_cached(document_id, "document")
+    if cached:
+        return {**cached, "cached": True}
+    try:
+        content = await summaries_service.generate_summary(document_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Tài liệu không có nội dung để tóm tắt."
+        ) from exc
+    except LLMTimeout as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="AI tóm tắt tài liệu quá lâu. Hãy thử lại sau.",
+        ) from exc
+    except (LLMModelMissing, LLMUnavailable) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Không kết nối được AI để tóm tắt tài liệu.",
+        ) from exc
+    except LLMEmptyResponse as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail="AI không trả về nội dung tóm tắt."
+        ) from exc
+    saved = summaries_repo.save(document_id, content, "document")
+    return {**saved, "cached": False}
 
 
 @router.delete("/{document_id}")

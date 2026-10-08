@@ -75,3 +75,41 @@ class ChatResponse(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
     # True khi câu trả lời có dùng ngữ cảnh trích từ tài liệu của người dùng.
     used_documents: bool = False
+
+
+class FeedbackCreate(BaseModel):
+    """Phản hồi / đánh giá của học viên gửi tới quản trị viên."""
+
+    rating: int = Field(ge=1, le=5)
+    category: str = "other"
+    content: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("category")
+    @classmethod
+    def _category_valid(cls, value: str) -> str:
+        cleaned = value.strip().lower()
+        if cleaned not in {"bug", "suggestion", "praise", "other"}:
+            raise ValueError("category phải là bug, suggestion, praise hoặc other")
+        return cleaned
+
+    @field_validator("content")
+    @classmethod
+    def _content_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("nội dung phản hồi không được để trống")
+        return cleaned
+
+
+class FeedbackReply(BaseModel):
+    """Quản trị viên trả lời một phản hồi."""
+
+    admin_reply: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("admin_reply")
+    @classmethod
+    def _reply_not_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("nội dung trả lời không được để trống")
+        return cleaned

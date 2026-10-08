@@ -7,10 +7,11 @@ from fastapi import APIRouter, Header, HTTPException, Request, status
 from ..deps import get_current_user, require_admin
 from ..repositories import audit as audit_repo
 from ..repositories import conversations as conversations_repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import sessions as sessions_repo
 from ..repositories import settings_repo
 from ..repositories import users as users_repo
-from ..schemas import SettingRequest, UserActionRequest
+from ..schemas import FeedbackReply, SettingRequest, UserActionRequest
 from ..security import hash_password
 
 router = APIRouter(prefix="/api/admin", tags=["Quản trị"])
@@ -121,4 +122,69 @@ async def admin_stats(request: Request, authorization: str | None = Header(defau
         "active_users": users_repo.count_active(),
         "conversations": conversations_repo.count_all(),
         "questions": conversations_repo.count_user_messages(),
+        "feedback_new": feedback_repo.count_new(),
+    }
+
+
+@router.get("/feedback")
+async def admin_feedback(request: Request, authorization: str | None = Header(default=None)) -> dict:
+    """Danh sách phản hồi của học viên kèm thông tin người gửi."""
+    _admin(request, authorization)
+    return {"items": feedback_repo.list_all()}
+
+
+@router.patch("/feedback/{feedback_id}")
+async def mark_feedback_read(
+    feedback_id: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Đánh dấu phản hồi đã xem. 404 nếu phản hồi không tồn tại."""
+    _admin(request, authorization)
+    if not feedback_repo.get(feedback_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phản hồi.")
+    feedback_repo.set_status(feedback_id, "read")
+    return {"message": "Đã đánh dấu đã xem"}
+
+
+@router.post("/feedback/{feedback_id}/reply")
+async def reply_feedback(
+    feedback_id: int,
+    payload: FeedbackReply,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Trả lời một phản hồi; học viên sẽ thấy câu trả lời trong trang Phản hồi."""
+    admin = _admin(request, authorization)
+    if not feedback_repo.get(feedback_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy phản hồi.")
+    feedback_repo.reply(feedback_id, payload.admin_reply)
+    audit_repo.log_action(int(admin["id"]), "reply_feedback", None, detail=f"feedback_id={feedback_id}")
+    return {"message": "Đã trả lời phản hồi"}
+
+
+@router.get("/users/{user_id}/history")
+async def user_question_history(
+    user_id: int,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Lịch sử hỏi đáp của một học viên: danh sách hội thoại kèm toàn bộ tin nhắn.
+
+    Chỉ quản trị viên mới xem được (403 với người dùng thường).
+    """
+    _admin(request, authorization)
+    target = users_repo.get_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tài khoản.")
+    conversations = conversations_repo.list_for_user(user_id, limit=100)
+    for conversation in conversations:
+        conversation["messages"] = conversations_repo.list_messages(int(conversation["id"]))
+    return {
+        "user": {
+            "id": target["id"],
+            "full_name": target["full_name"],
+            "email": target["email"],
+        },
+        "conversations": conversations,
     }
