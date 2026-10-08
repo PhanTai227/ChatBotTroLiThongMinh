@@ -8,8 +8,10 @@ tới mã nghiệp vụ.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
@@ -38,8 +40,12 @@ Hãy trả lời câu hỏi DỰA TRÊN CHÍNH CÁC TRÍCH ĐOẠN ĐÓ:
 NO_CONTEXT_ANSWER = (
     "Tôi chưa tìm thấy phần tài liệu nào liên quan đủ để trả lời câu hỏi này. "
     "Bạn có thể tải thêm tài liệu, đặt câu hỏi khái quát hơn, "
-    "hoặc hỏi trực tiếp môn học ở mục Bài tập & Quiz."
+    "hoặc hỏi lại với cách diễn đạt khác."
 )
+
+# Số tin nhắn cũ được đưa vào ngữ cảnh hội thoại: giữ hội thoại đa lượt mà vẫn tiết kiệm token.
+HISTORY_MESSAGE_LIMIT = 10
+
 
 _MODEL_CACHE_TTL_SECONDS = 60.0
 _CONNECT_ATTEMPTS = 2
@@ -87,7 +93,10 @@ class OllamaProvider:
         self._num_predict = settings.model_num_predict
         self._num_ctx = settings.model_num_ctx
 
-    async def generate(self, messages: list[dict[str, str]], model: str) -> LLMResult:
+    async def generate(
+        self, messages: list[dict[str, str]], model: str, *, num_predict: int | None = None
+    ) -> LLMResult:
+        """Sinh nội dung. `num_predict` cho phép tăng giới hạn token riêng từng tác vụ."""
         payload = {
             "model": model,
             "messages": messages,
@@ -96,7 +105,7 @@ class OllamaProvider:
             "options": {
                 "temperature": self._temperature,
                 "top_p": self._top_p,
-                "num_predict": self._num_predict,
+                "num_predict": num_predict if num_predict is not None else self._num_predict,
                 "num_ctx": self._num_ctx,
             },
         }
@@ -112,6 +121,66 @@ class OllamaProvider:
         if not content:
             raise LLMEmptyResponse("Ollama trả về nội dung rỗng.")
         return LLMResult(content=content, model=model)
+
+    async def stream(
+        self, messages: list[dict[str, str]], model: str, *, num_predict: int | None = None
+    ) -> AsyncIterator[str]:
+        """Sinh nội dung theo từng phần (streaming) để giao diện hiển thị ngay khi chưa xong.
+
+        Ném cùng nhóm lỗi với `generate()` để endpoint xử lý nhất quán. Lỗi trong
+        quá trình đọc stream được gói thành LLMUnavailable.
+        """
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "keep_alive": self._keep_alive,
+            "options": {
+                "temperature": self._temperature,
+                "top_p": self._top_p,
+                "num_predict": num_predict if num_predict is not None else self._num_predict,
+                "num_ctx": self._num_ctx,
+            },
+        }
+        last_error: httpx.HTTPError | None = None
+        for attempt in range(1, _CONNECT_ATTEMPTS + 1):
+            try:
+                async with (
+                    httpx.AsyncClient(timeout=self._timeout) as client,
+                    client.stream("POST", f"{self._host}/api/chat", json=payload) as response,
+                ):
+                    if response.status_code == 404:
+                        raise LLMModelMissing(f"Ollama không có model {model!r}.")
+                    if response.status_code >= 400:
+                        raise LLMUnavailable(f"Ollama trả về mã lỗi {response.status_code}.")
+                    emitted = False
+                    async for line in response.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = json.loads(line)
+                        except ValueError as exc:
+                            raise LLMUnavailable("Ollama trả về dữ liệu không hợp lệ.") from exc
+                        if data.get("error"):
+                            raise LLMUnavailable(str(data["error"]))
+                        chunk = data.get("message", {}).get("content", "")
+                        if chunk:
+                            emitted = True
+                            yield chunk
+                        if data.get("done"):
+                            break
+                    if not emitted:
+                        raise LLMEmptyResponse("Ollama trả về nội dung rỗng.")
+                    return
+            except httpx.TimeoutException as exc:
+                raise LLMTimeout("Máy chủ AI phản hồi quá lâu.") from exc
+            except httpx.ConnectError as exc:
+                last_error = exc
+                if attempt < _CONNECT_ATTEMPTS:
+                    await asyncio.sleep(1.0)
+            except httpx.HTTPError as exc:
+                raise LLMUnavailable("Không kết nối được máy chủ AI.") from exc
+        raise LLMUnavailable("Không kết nối được máy chủ AI.") from last_error
 
     async def list_models(self) -> list[str]:
         response = await self._get(f"{self._host}/api/tags", self._health_timeout)

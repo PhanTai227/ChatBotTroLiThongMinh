@@ -49,16 +49,18 @@ def test_business_tables_are_present() -> None:
         "chunks",
         "document_summaries",
         "message_citations",
-        "quizzes",
-        "quiz_questions",
-        "quiz_attempts",
-        "quiz_answers",
         "progress_stats",
         "message_feedback",
         "processing_jobs",
         "login_attempts",
+        "feedback",
     }
     assert expected <= _database_tables()
+
+
+def test_quiz_tables_are_removed() -> None:
+    """Module Quiz đã bị loại khỏi sản phẩm (kế hoạch cắt chức năng bài tập)."""
+    assert not {"quizzes", "quiz_questions", "quiz_attempts", "quiz_answers"} & _database_tables()
 
 
 def test_foreign_keys_enforced_for_business_tables() -> None:

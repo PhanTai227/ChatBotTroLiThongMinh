@@ -1,30 +1,23 @@
 import { useEffect, useState } from 'react';
 import { StatCard } from './components/DashboardCards';
-import { DailyGoal, WeeklyChart } from './components/LearningPanels';
 import { DocumentsPage } from './components/DocumentsPage';
 import { AiChatPage } from './components/AiChatPage';
-import { QuizPage } from './components/QuizPage';
-import { HistoryPage } from './components/HistoryPage';
-import { ProgressPage } from './components/ProgressPage';
+import { FeedbackPage } from './components/FeedbackPage';
 import { AuthPage } from './components/AuthPage';
 import { AdminPage } from './components/AdminPage';
 import { apiRequest, clearToken, getToken, type AuthResponse, type User } from './lib/auth';
 import type { LucideIcon } from 'lucide-react';
 import {
-  BarChart3,
   BookOpen,
   Bot,
   ChevronRight,
-  Clock3,
-  FileText,
   Home,
   Library,
   LogOut,
   Menu,
   MessageSquareText,
-  MoreHorizontal,
+  MessageSquareHeart,
   ShieldCheck,
-  Sparkles,
   Upload,
   X,
 } from 'lucide-react';
@@ -33,22 +26,24 @@ const navItems: { label: string; icon: LucideIcon }[] = [
   { label: 'Tổng quan', icon: Home },
   { label: 'Tài liệu', icon: Library },
   { label: 'Trợ lý AI', icon: Bot },
-  { label: 'Bài tập & Quiz', icon: FileText },
-  { label: 'Lịch sử học tập', icon: Clock3 },
-  { label: 'Tiến độ học tập', icon: BarChart3 },
+  { label: 'Phản hồi', icon: MessageSquareHeart },
 ];
 
 const quickActions = [
-  { title: 'Tải tài liệu lên', description: 'PDF, Word, Excel hoặc ảnh', icon: Upload },
-  { title: 'Hỏi trợ lý AI', description: 'Giải thích và hỗ trợ bài học', icon: MessageSquareText },
-  { title: 'Tạo bài ôn tập', description: 'Sinh quiz từ tài liệu của bạn', icon: Sparkles },
+  { title: 'Tải tài liệu lên', description: 'PDF, Word, Excel hoặc ảnh', icon: Upload, page: 'Tài liệu' },
+  { title: 'Hỏi trợ lý AI', description: 'Giải thích và hỗ trợ bài học', icon: MessageSquareText, page: 'Trợ lý AI' },
+  { title: 'Gửi phản hồi', description: 'Đánh giá và góp ý cho quản trị', icon: MessageSquareHeart, page: 'Phản hồi' },
 ];
 
-const documents = [
-  { title: 'Giáo trình Trí tuệ nhân tạo', type: 'PDF', pages: '42 trang', time: '10 phút trước', color: 'bg-rose-50 text-rose-600' },
-  { title: 'Slide Thuật toán tối ưu', type: 'PDF', pages: '28 trang', time: 'Hôm qua', color: 'bg-amber-50 text-amber-600' },
-  { title: 'Bài tập Giải thuật tuần 3', type: 'DOCX', pages: '12 trang', time: '2 ngày trước', color: 'bg-sky-50 text-sky-600' },
-];
+type ProgressOverview = { documents: number; questions: number; conversations: number };
+type ProgressActivity = {
+  id: string;
+  type: string;
+  title: string;
+  detail: string;
+  subject: string | null;
+  at: string;
+};
 
 function Brand() {
   return (
@@ -104,9 +99,9 @@ function Header({ onMenu, user, onLogout }: { onMenu: () => void; user: User; on
   );
 }
 
-function QuickAction({ item }: { item: (typeof quickActions)[number] }) {
+function QuickAction({ item, onGo }: { item: (typeof quickActions)[number]; onGo: (page: string) => void }) {
   return (
-    <button className="card group flex items-center gap-4 p-4 text-left transition hover:border-accent">
+    <button onClick={() => onGo(item.page)} className="card group flex items-center gap-4 p-4 text-left transition hover:border-accent">
       <div className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent transition group-hover:bg-accent group-hover:text-white"><item.icon size={19} /></div>
       <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-ink">{item.title}</p><p className="mt-0.5 truncate text-xs text-muted">{item.description}</p></div>
       <ChevronRight className="text-muted transition group-hover:translate-x-0.5 group-hover:text-accent" size={17} />
@@ -114,20 +109,67 @@ function QuickAction({ item }: { item: (typeof quickActions)[number] }) {
   );
 }
 
-function RecentDocuments() {
+/** Trang Tổng quan dùng số liệu thật từ /api/progress thay vì dữ liệu giả. */
+function OverviewPage({ onGo }: { onGo: (page: string) => void }) {
+  const [overview, setOverview] = useState<ProgressOverview | null>(null);
+  const [activities, setActivities] = useState<ProgressActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiRequest<{ overview: ProgressOverview; activities: ProgressActivity[] }>('/api/progress')
+      .then((data) => {
+        setOverview(data.overview);
+        setActivities(data.activities.slice(0, 5));
+      })
+      .catch(() => undefined)
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
-    <section className="card p-5 sm:p-6">
-      <div className="mb-4"><h2 className="section-title text-ink">Tài liệu gần đây</h2><p className="mt-1 text-xs text-muted">Tiếp tục học từ tài liệu đã tải lên</p></div>
-      <div className="divide-y divide-line">
-        {documents.map((doc) => (
-          <button key={doc.title} className="group flex w-full items-center gap-3 py-3 text-left first:pt-0 last:pb-0">
-            <div className={`grid size-10 shrink-0 place-items-center rounded-lg text-[10px] font-bold ${doc.color}`}>{doc.type}</div>
-            <div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-ink group-hover:text-accent">{doc.title}</p><p className="mt-0.5 text-[11px] text-muted">{doc.pages} · {doc.time}</p></div>
-            <MoreHorizontal size={17} className="text-line" />
-          </button>
-        ))}
-      </div>
-    </section>
+    <>
+      <section className="animate-fade-up flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="eyebrow text-accent">Không gian cá nhân</p>
+          <h1 className="page-title mt-2 text-3xl text-ink">Tổng quan học tập</h1>
+          <p className="mt-2 text-sm text-muted">Số liệu cập nhật theo hoạt động thật của bạn.</p>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatCard title="Tài liệu" value={loading ? '…' : String(overview?.documents ?? 0)} detail="Đã tải lên hệ thống" icon={BookOpen} tone="indigo" />
+        <StatCard title="Câu hỏi đã hỏi" value={loading ? '…' : String(overview?.questions ?? 0)} detail="Đã hỏi trợ lý AI" icon={MessageSquareText} tone="orange" />
+        <StatCard title="Hội thoại" value={loading ? '…' : String(overview?.conversations ?? 0)} detail="Cuộc trò chuyện với AI" icon={Bot} tone="emerald" />
+      </section>
+
+      <section>
+        <div className="mb-4"><h2 className="section-title text-ink">Bắt đầu nhanh</h2><p className="mt-1 text-xs text-muted">Tính năng bạn có thể sử dụng ngay</p></div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">{quickActions.map((item) => <QuickAction key={item.title} item={item} onGo={onGo} />)}</div>
+      </section>
+
+      <section className="card p-5 sm:p-6">
+        <div className="mb-4"><h2 className="section-title text-ink">Hoạt động gần đây</h2><p className="mt-1 text-xs text-muted">Hỏi đáp và tài liệu mới nhất của bạn</p></div>
+        {loading && <p className="py-6 text-center text-sm text-muted">Đang tải...</p>}
+        {!loading && activities.length === 0 && (
+          <div className="rounded-2xl border border-dashed border-line bg-paper py-10 text-center">
+            <p className="font-semibold text-ink">Chưa có hoạt động nào</p>
+            <p className="mt-1 text-sm text-muted">Hãy tải tài liệu lên rồi đặt câu hỏi đầu tiên.</p>
+          </div>
+        )}
+        <div className="divide-y divide-line">
+          {activities.map((activity) => (
+            <div key={activity.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+              <div className={`grid size-10 shrink-0 place-items-center rounded-lg text-[10px] font-bold ${activity.type === 'Chat AI' ? 'bg-accent-soft text-accent' : 'bg-sky-50 text-sky-700'}`}>
+                {activity.type === 'Chat AI' ? 'AI' : 'TL'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink">{activity.title}</p>
+                <p className="mt-0.5 truncate text-[11px] text-muted">{activity.detail}{activity.subject ? ` · ${activity.subject}` : ''}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -171,46 +213,13 @@ export default function App() {
           <AdminPage />
         ) : activePage === 'Trợ lý AI' ? (
           <AiChatPage />
-        ) : activePage === 'Bài tập & Quiz' ? (
-          <QuizPage />
-        ) : activePage === 'Lịch sử học tập' ? (
-          <HistoryPage />
-        ) : activePage === 'Tiến độ học tập' ? (
-          <ProgressPage />
+        ) : activePage === 'Phản hồi' ? (
+          <FeedbackPage />
         ) : activePage === 'Tài liệu' ? (
           <DocumentsPage />
         ) : (
-            <>
-          <section className="animate-fade-up flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-            <div>
-              <p className="eyebrow text-accent">Không gian cá nhân</p>
-              <h1 className="page-title mt-2 text-3xl text-ink">Chào buổi sáng, An!</h1>
-              <p className="mt-2 text-sm text-muted">Bạn đang có một ngày học tập hiệu quả. Tiếp tục thôi!</p>
-            </div>
-          </section>
-
-          <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard title="Tài liệu đã học" value="24" detail="↗ 3 tài liệu trong tuần này" icon={BookOpen} tone="indigo" />
-            <StatCard title="Câu hỏi đã hỏi" value="186" detail="↗ 12% so với tuần trước" icon={MessageSquareText} tone="orange" />
-            <StatCard title="Bài đã hoàn thành" value="32" detail="↗ 8 bài trong tuần này" icon={FileText} tone="emerald" />
-          </section>
-
-          <section>
-            <div className="mb-4"><h2 className="section-title text-ink">Bắt đầu nhanh</h2><p className="mt-1 text-xs text-muted">Tính năng bạn có thể sử dụng ngay</p></div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">{quickActions.map((item) => <QuickAction key={item.title} item={item} />)}</div>
-          </section>
-
-          <section className="grid grid-cols-1 gap-5 xl:grid-cols-[1.65fr_1fr]">
-            <div className="card p-5 sm:p-6">
-              <div className="mb-2"><h2 className="section-title text-ink">Hoạt động học tập</h2><p className="mt-1 text-xs text-muted">Thời gian học trong 7 ngày qua</p></div>
-              <WeeklyChart />
-            </div>
-            <DailyGoal />
-          </section>
-
-          <RecentDocuments />
-            </>
-          )}
+          <OverviewPage onGo={navigate} />
+        )}
         </main>
       </div>
     </div>

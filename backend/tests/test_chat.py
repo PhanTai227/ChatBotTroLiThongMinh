@@ -33,6 +33,16 @@ class FakeProvider:
             raise self.error
         return LLMResult(content=self.content, model=model)
 
+    async def stream(self, messages: list[dict[str, str]], model: str):
+        """Bản streaming của cùng nội dung, chia nhỏ để kiểm tra nối delta."""
+        self.calls.append((messages, model))
+        if self.error is not None:
+            raise self.error
+        # Chia thành 3 mốc để kiểm tra bên nhận được nhiều sự kiện delta.
+        step = max(1, len(self.content) // 3)
+        for start in range(0, len(self.content), step):
+            yield self.content[start : start + step]
+
     async def list_models(self) -> list[str]:
         if self.error is not None:
             raise self.error
@@ -162,3 +172,85 @@ def test_question_is_kept_even_when_ai_fails(
 def test_empty_message_is_rejected(client: TestClient, make_user) -> None:
     token, _ = make_user()
     assert client.post("/api/chat", json={"message": "   "}, headers=auth_header(token)).status_code == 422
+
+
+def test_chat_stream_emits_deltas_and_done(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_user
+) -> None:
+    """Streaming trả về meta -> nhiều delta -> citations -> done, và lưu đủ tin nhắn."""
+    provider = FakeProvider(content="Gradient Descent từng bước: tính gradient, cập nhật tham số.")
+    use_provider(monkeypatch, provider)
+    token, _ = make_user()
+
+    response = client.post(
+        "/api/chat/stream",
+        json={"message": "Gradient Descent hoạt động thế nào?"},
+        headers=auth_header(token),
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    import json as jsonlib
+
+    events = [
+        jsonlib.loads(line.removeprefix("data: "))
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+    assert events[0]["type"] == "meta"
+    assert events[0]["conversation_id"] > 0
+    deltas = [event for event in events if event["type"] == "delta"]
+    assert len(deltas) >= 2  # nội dung bị chia thành nhiều phần
+    assert "".join(event["text"] for event in deltas) == provider.content
+    assert events[-1]["type"] == "done"
+    assert any(event["type"] == "citations" for event in events)
+
+    from app.db import read_connection
+
+    with read_connection() as connection:
+        messages = connection.execute(
+            "SELECT role, content FROM messages WHERE conversation_id = ? ORDER BY id",
+            (events[0]["conversation_id"],),
+        ).fetchall()
+    assert [row["role"] for row in messages] == ["user", "assistant"]
+    assert messages[1]["content"] == provider.content
+
+
+def test_chat_stream_reports_ai_error(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_user
+) -> None:
+    """Lỗi AI giữa chừng được báo qua sự kiện error thay vì sập kết nối."""
+    use_provider(monkeypatch, FakeProvider(error=LLMUnavailable("down")))
+    token, _ = make_user()
+
+    response = client.post(
+        "/api/chat/stream", json={"message": "Câu hỏi khi AI lỗi"}, headers=auth_header(token)
+    )
+    assert response.status_code == 200
+    assert '"type": "error"' in response.text or '"type":"error"' in response.text.replace(" ", "")
+
+
+def test_chat_uses_conversation_history_in_prompt(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, make_user
+) -> None:
+    """Các lượt hỏi trước phải được đưa vào prompt để AI hiểu ngữ cảnh nhiều lượt."""
+    provider = FakeProvider()
+    use_provider(monkeypatch, provider)
+    token, _ = make_user()
+    first = client.post(
+        "/api/chat", json={"message": "Giải thích về RAG"}, headers=auth_header(token)
+    ).json()
+    client.post(
+        "/api/chat",
+        json={"message": "Vậy nó khác gì fine-tuning?", "conversation_id": first["conversation_id"]},
+        headers=auth_header(token),
+    )
+
+    second_call_messages = provider.calls[-1][0]
+    roles = [message["role"] for message in second_call_messages]
+    contents = [message["content"] for message in second_call_messages]
+    assert roles[0] == "system"
+    # Có đủ: system + user(lượt 1) + assistant(trả lời 1) + user(câu 2).
+    assert "Giải thích về RAG" in contents
+    assert any(role == "assistant" for role in roles[1:-1])
+    assert contents[-1].endswith("Vậy nó khác gì fine-tuning?")
