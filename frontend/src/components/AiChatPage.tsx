@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiRequest, apiStream, type Citation, type DocumentItem } from '../lib/auth';
+import { MATH_FONTS, MathMarkdown, getMathFont, setMathFont, type MathFontId } from './MathMarkdown';
 import {
   Bot,
   BookOpen,
@@ -57,7 +58,7 @@ function formatTime(value: string) {
   return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
-function MessageItem({ message }: { message: ChatMessage }) {
+function MessageItem({ message, mathFont }: { message: ChatMessage; mathFont: MathFontId }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end gap-3">
@@ -74,7 +75,7 @@ function MessageItem({ message }: { message: ChatMessage }) {
       <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-white"><Sparkles size={17} /></div>
       <div className="max-w-[90%] space-y-2 sm:max-w-[80%]">
         <div className="rounded-2xl rounded-tl-md border border-line bg-surface px-4 py-3 text-sm leading-6 text-ink">
-          <p className="whitespace-pre-line">{message.content}</p>
+          <MathMarkdown content={message.content} font={mathFont} />
           {message.citations && message.citations.length > 0 && (
             <div className="mt-4 border-t border-line pt-3">
               <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted">Nguồn tham khảo</p>
@@ -104,7 +105,13 @@ export function AiChatPage() {
   const [streaming, setStreaming] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState('');
+  const [mathFont, setMathFontState] = useState<MathFontId>(() => getMathFont());
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const changeMathFont = (font: MathFontId) => {
+    setMathFontState(font);
+    setMathFont(font);
+  };
 
   const loadConversations = async () => {
     try {
@@ -274,6 +281,22 @@ export function AiChatPage() {
           <div className="min-w-0 flex-1"><h1 className="truncate text-sm font-semibold text-ink">Trợ lý học tập AI</h1><p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted"><span className="size-1.5 rounded-full bg-emerald-500" />{streaming ? 'Đang trả lời...' : 'Sẵn sàng hỗ trợ'}</p></div>
           <label className="hidden max-w-[310px] flex-1 items-center gap-2 rounded-lg border border-line px-3 md:flex"><BookOpen size={15} className="shrink-0 text-muted" /><select aria-label="Chọn tài liệu" value={selectedDocumentId} onChange={(e) => setSelectedDocumentId(e.target.value)} className="h-10 min-w-0 flex-1 bg-transparent text-xs font-semibold text-ink outline-none"><option value="all">Tất cả tài liệu</option>{documents.map((document) => <option key={document.id} value={String(document.id)}>{document.file_name}</option>)}</select><ChevronDown size={14} /></label>
         </header>
+        <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper px-4 py-2 sm:px-7">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-muted">Font công thức:</span>
+          <div className="math-font-controls" role="group" aria-label="Chọn font công thức toán">
+            {MATH_FONTS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                title={item.hint}
+                aria-pressed={mathFont === item.id}
+                onClick={() => changeMathFont(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-6 sm:px-7">
           <div className="mx-auto max-w-4xl space-y-6">
@@ -287,7 +310,7 @@ export function AiChatPage() {
                 </div>
               </div>
             )}
-            {messages.map((message) => <MessageItem key={message.id} message={message} />)}
+            {messages.map((message) => <MessageItem key={message.id} message={message} mathFont={mathFont} />)}
             {thinking && <div className="flex gap-3"><div className="grid size-9 place-items-center rounded-lg bg-accent text-white"><Sparkles size={17} /></div><div className="rounded-2xl rounded-tl-md border border-line bg-surface px-4 py-3 text-sm text-muted">AI local đang phân tích câu hỏi<span className="ml-1 inline-flex gap-1"><i className="size-1 animate-pulse rounded-full bg-accent" /><i className="size-1 animate-pulse rounded-full bg-accent [animation-delay:200ms]" /><i className="size-1 animate-pulse rounded-full bg-accent [animation-delay:400ms]" /></span></div></div>}
             {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</div>}
             <div ref={bottomRef} />

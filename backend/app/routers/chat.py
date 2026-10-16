@@ -28,6 +28,7 @@ from ..repositories import progress as progress_repo
 from ..repositories import settings_repo
 from ..schemas import ChatRequest, ChatResponse, Citation
 from ..services import retrieval
+from ..services import embeddings as embeddings_service
 from ..services.embeddings import EmbeddingError, EmbeddingUnavailable
 from ..services.llm import (
     HISTORY_MESSAGE_LIMIT,
@@ -74,6 +75,16 @@ async def health() -> dict:
         name == model or name.startswith(model) for name in models
     )
 
+    # Model sinh vector (embedding) quyết định tài liệu có qua được 85% hay không:
+    # kiểm tra riêng để giao diện cảnh báo chính xác thay vì để người dùng đoán mò.
+    embedding_model = (
+        settings_repo.get_value("embedding_model", settings.embedding_model)
+        or settings.embedding_model
+    )
+    embedding_model_available = ollama_state == "connected" and any(
+        name == embedding_model or name.startswith(embedding_model) for name in models
+    )
+
     issues: list[str] = []
     if database != "ok":
         issues.append("database_unavailable")
@@ -83,7 +94,20 @@ async def health() -> dict:
         issues.append("no_model_installed")
     elif not model_available:
         issues.append("configured_model_missing")
+    if ollama_state == "connected" and not embedding_model_available:
+        issues.append("embedding_model_missing")
 
+    # Cảnh báo sớm trong log để người vận hành thấy ngay khi mở nhật ký.
+    if "embedding_model_missing" in issues:
+        logger.warning(
+            "Thiếu model embedding '%s' trong Ollama: tài liệu sẽ kẹt ở 85%%. "
+            "Chạy `ollama pull %s` rồi bấm Thử lại cho tài liệu kẹt.",
+            embedding_model, embedding_model,
+        )
+    if "no_model_installed" in issues or "configured_model_missing" in issues:
+        logger.warning("Model chat '%s' chưa sẵn sàng trong Ollama.", model)
+
+    _ = embeddings_service  # giữ import rõ ràng cho lần kiểm tra trực tiếp sau này
     return {
         "status": "ok" if not issues else "degraded",
         "ollama": ollama_state,
@@ -91,6 +115,8 @@ async def health() -> dict:
         "ollama_models": models,
         "model": model,
         "model_available": model_available,
+        "embedding_model": embedding_model,
+        "embedding_model_available": embedding_model_available,
         "database": database,
         "llm_provider": settings.llm_provider,
         "app_mode": settings.app_mode,

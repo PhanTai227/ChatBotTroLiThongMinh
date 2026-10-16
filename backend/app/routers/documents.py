@@ -149,6 +149,7 @@ async def document_status(
     """Giao diện gọi định kỳ để theo dõi tiến trình xử lý tài liệu."""
     user = get_current_user(request, authorization)
     document = _owned_document(document_id, int(user["id"]))
+    job = jobs_repo.latest_for_document(document_id)
     return {
         "id": document["id"],
         "status": document["status"],
@@ -156,7 +157,43 @@ async def document_status(
         "page_count": document["page_count"],
         "extract_method": document["extract_method"],
         "chunk_count": chunks_repo.count_for_document(document_id),
+        "job": job,
     }
+
+
+@router.post("/{document_id}/retry")
+async def retry_document(
+    document_id: int, request: Request, authorization: str | None = Header(default=None)
+) -> dict:
+    """Chạy lại xử lý cho tài liệu đang kẹt (embedding) hoặc đã lỗi.
+
+    - Tài liệu `error`: đưa về hàng đợi và xử lý lại ngay trong request này.
+    - Tài liệu `embedding` (kẹt giữa chừng): xử lý lại ngay, không cần chờ worker.
+    - Tài liệu đã `ready`: không làm gì, trả về trạng thái hiện tại.
+    """
+    from ..services import documents as documents_service
+
+    user = get_current_user(request, authorization)
+    document = _owned_document(document_id, int(user["id"]))
+    current = str(document["status"])
+    if current == "ready":
+        return _owned_document(document_id, int(user["id"]))
+
+    # Trích xuất lại từ đầu khi tài liệu lỗi ở giai đoạn OCR (chưa có chunk),
+    # chỉ sinh lại vector khi đã có chunk mà kẹt ở giai đoạn embedding.
+    has_chunks = chunks_repo.count_for_document(document_id) > 0
+    if current == "error" and not has_chunks:
+        stage = jobs_repo.STAGE_OCR
+        documents_repo.set_status(document_id, "uploading", error_message=None)
+    else:
+        stage = jobs_repo.STAGE_EMBEDDING
+        if current != "embedding":
+            documents_repo.set_status(document_id, "embedding", error_message=None)
+    requeued = jobs_repo.requeue_for_document(document_id, stage)
+    if requeued == 0 and not jobs_repo.has_active(document_id):
+        jobs_repo.enqueue(document_id, stage)
+    await documents_service.run_pending_jobs()
+    return _owned_document(document_id, int(user["id"]))
 
 
 @router.patch("/{document_id}")

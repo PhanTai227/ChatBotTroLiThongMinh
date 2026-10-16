@@ -1,0 +1,163 @@
+/* ===== Công thức toán (KaTeX) — chống lỗi font ===== */
+
+/* KaTeX render bằng font riêng của nó (KaTeX_Math, KaTeX_Main...).
+   Ép kế thừa font chữ giao diện sẽ làm vỡ ký tự toán, nên luôn
+   ưu tiên font KaTeX trước, rồi mới tới font dự phòng hệ thống. */
+.math-body .katex {
+  font-size: 1.08em;
+  text-rendering: optimizeLegibility;
+}
+
+.math-font-katex .katex {
+  font-family:
+    'KaTeX_Math', 'KaTeX_Main', 'Latin Modern Math', 'STIX Two Math',
+    'Cambria Math', 'Segoe UI Symbol', serif;
+}
+
+.math-font-serif .katex {
+  font-family:
+    'Cambria Math', 'STIX Two Math', 'Latin Modern Math',
+    'KaTeX_Math', 'KaTeX_Main', Georgia, 'Times New Roman', serif;
+}
+
+.math-font-sans .katex {
+  font-family:
+    'KaTeX_Math', 'KaTeX_Main', 'Be Vietnam Pro', 'Segoe UI',
+    'Cambria Math', 'Segoe UI Symbol', sans-serif;
+}
+
+/* Công thức khối: nền nhẹ, cuộn ngang khi quá dài, tránh tràn khung chat */
+.math-body .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.6rem 0.75rem;
+  margin: 0.5rem 0;
+  background: #faf9f6;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+}
+
+.math-body .katex-display > .katex {
+  white-space: nowrap;
+}
+
+/* Khi KaTeX báo lỗi cú pháp: hiện mã nguồn thay vì ký tự vỡ */
+.math-body .katex-error {
+  color: #b42318;
+  background: #fef2f2;
+  border-radius: 6px;
+  padding: 0 0.35rem;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+/* ===== Markdown trong tin nhắn AI ===== */
+
+.math-body {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.math-body > *:first-child { margin-top: 0; }
+.math-body > *:last-child { margin-bottom: 0; }
+
+.math-body p { margin: 0.4rem 0; }
+.math-body ul, .math-body ol { margin: 0.4rem 0; padding-left: 1.25rem; }
+.math-body li { margin: 0.2rem 0; }
+.math-body li::marker { color: var(--color-accent); }
+
+.math-body h1, .math-body h2, .math-body h3, .math-body h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  margin: 0.75rem 0 0.35rem;
+  line-height: 1.4;
+}
+.math-body h1 { font-size: 1.1rem; }
+.math-body h2 { font-size: 1.02rem; }
+.math-body h3 { font-size: 0.95rem; }
+.math-body h4 { font-size: 0.88rem; }
+
+.math-body code {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.82em;
+  background: #f1eee6;
+  border-radius: 6px;
+  padding: 0.1rem 0.35rem;
+}
+
+.math-body pre {
+  background: #1c1917;
+  color: #f6f4ee;
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+
+.math-body pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.math-body table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+  font-size: 0.82rem;
+}
+
+.math-body th, .math-body td {
+  border: 1px solid var(--color-line);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+.math-body th {
+  background: #f1eee6;
+  font-weight: 700;
+}
+
+.math-body blockquote {
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  border-radius: 0 8px 8px 0;
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+}
+
+.math-body a { color: var(--color-accent); font-weight: 600; }
+.math-body strong { font-weight: 700; }
+.math-body hr { border: none; border-top: 1px solid var(--color-line); margin: 0.75rem 0; }
+
+.math-font-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.math-font-controls button {
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+  color: var(--color-muted);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.math-font-controls button:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.math-font-controls button[aria-pressed='true'] {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}

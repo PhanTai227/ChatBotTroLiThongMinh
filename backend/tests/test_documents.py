@@ -186,6 +186,72 @@ def test_empty_text_marks_document_error(client: TestClient, make_user, upload) 
     assert chunks_repo.count_for_document(document_id) == 0
 
 
+def test_retry_endpoint_reruns_stuck_embedding(
+    client: TestClient, make_user, upload, sample_pdf: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tài liệu kẹt ở embedding (Ollama lỗi 1 lần rồi khỏi) phải được retry cho về ready."""
+    from app.services import embeddings
+
+    token, _ = make_user()
+    document_id = int(upload(token, sample_pdf, filename="ket.pdf").json()["id"])
+    body = client.get(f"/api/documents/{document_id}/status", headers=auth_header(token)).json()
+    assert body["status"] == "ready"
+
+    # Giả lập: chunk đã có nhưng vector_ref bị mất (kẹt embedding), Ollama lỗi lần đầu.
+    from app.db import transaction
+
+    with transaction() as connection:
+        connection.execute("UPDATE chunks SET vector_ref = NULL WHERE document_id = ?", (document_id,))
+    from app.repositories import documents as documents_repo
+
+    documents_repo.set_status(document_id, "embedding", error_message=None)
+    jobs_repo.enqueue(document_id, jobs_repo.STAGE_EMBEDDING)
+
+    calls = {"count": 0}
+    real_embed = embeddings.embed_texts
+
+    async def flaky(texts: list[str]):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise embeddings.EmbeddingUnavailable("Ollama chưa sẵn sàng.")
+        return await real_embed(texts)
+
+    monkeypatch.setattr(embeddings, "embed_texts", flaky)
+
+    # Lần retry đầu: Ollama lỗi -> vẫn embedding (job hẹn thử lại), lần 2: khỏi -> ready.
+    first = client.post(f"/api/documents/{document_id}/retry", headers=auth_header(token))
+    assert first.status_code == 200, first.text
+    second = client.post(f"/api/documents/{document_id}/retry", headers=auth_header(token))
+    assert second.status_code == 200, second.text
+    # Chờ worker logic: job lần 1 hẹn 5s nên lần retry 2 chưa tới hẹn -> ép chạy bằng cách xoá hẹn.
+    with transaction() as connection:
+        connection.execute(
+            "UPDATE processing_jobs SET next_retry_at = NULL WHERE document_id = ?", (document_id,)
+        )
+    third = client.post(f"/api/documents/{document_id}/retry", headers=auth_header(token))
+    assert third.status_code == 200, third.text
+    assert third.json()["status"] == "ready"
+
+
+def test_retry_ready_document_is_noop(
+    client: TestClient, make_user, upload, sample_pdf: bytes
+) -> None:
+    token, _ = make_user()
+    document_id = int(upload(token, sample_pdf, filename="sansang.pdf").json()["id"])
+    response = client.post(f"/api/documents/{document_id}/retry", headers=auth_header(token))
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+
+def test_status_includes_job_info(
+    client: TestClient, make_user, upload, sample_pdf: bytes
+) -> None:
+    token, _ = make_user()
+    document_id = int(upload(token, sample_pdf, filename="jobinfo.pdf").json()["id"])
+    body = client.get(f"/api/documents/{document_id}/status", headers=auth_header(token)).json()
+    assert "job" in body
+
+
 def test_job_queue_claim_and_retry(client: TestClient, make_user, upload, sample_pdf: bytes) -> None:
     token, _ = make_user()
     document_id = int(upload(token, sample_pdf, filename="hang-cho.pdf").json()["id"])

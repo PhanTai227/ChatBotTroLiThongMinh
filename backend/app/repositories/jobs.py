@@ -110,6 +110,39 @@ def list_recent(limit: int = 20) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def latest_for_document(document_id: int) -> dict | None:
+    """Việc gần nhất của một tài liệu, dùng để báo lý do kẹt cho giao diện."""
+    with read_connection() as connection:
+        row = connection.execute(
+            "SELECT id, document_id, stage, status, attempts, last_error, next_retry_at, updated_at "
+            "FROM processing_jobs WHERE document_id = ? ORDER BY id DESC LIMIT 1",
+            (document_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def has_active(document_id: int) -> bool:
+    """True khi tài liệu còn việc đang chờ hoặc đang chạy (không nên enqueue thêm)."""
+    with read_connection() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM processing_jobs WHERE document_id = ? AND status IN ('pending', 'running') LIMIT 1",
+            (document_id,),
+        ).fetchone()
+    return row is not None
+
+
+def requeue_for_document(document_id: int, stage: str) -> int:
+    """Đưa các việc lỗi/kẹt của tài liệu về hàng đợi lại. Trả về số việc được đưa lại."""
+    with transaction() as connection:
+        cursor = connection.execute(
+            "UPDATE processing_jobs SET status = 'pending', last_error = NULL, next_retry_at = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE document_id = ? AND stage = ? "
+            "AND status IN ('pending', 'running', 'error')",
+            (document_id, stage),
+        )
+        return int(cursor.rowcount or 0)
+
+
 def next_backoff_seconds(attempts: int) -> int:
     """Thời gian chờ trước khi thử lại: 5 giây, 30 giây, 120 giây."""
     return (5, 30, 120)[min(max(attempts, 1), 3) - 1]

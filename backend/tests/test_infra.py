@@ -50,13 +50,32 @@ def test_error_response_has_code_and_request_id(client: TestClient) -> None:
 def test_health_reports_ok_when_ai_reachable(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    use_provider(monkeypatch, FakeProvider())
+    provider = FakeProvider()
+    provider.list_models = _list_models_with_embedding  # type: ignore[method-assign]
+    use_provider(monkeypatch, provider)
     body = client.get("/api/health").json()
     assert body["status"] == "ok"
     assert body["ollama"] == "connected"
     assert body["database"] == "ok"
     assert body["model_available"] is True
-    assert body["ollama_models"] == ["qwen2.5:3b"]
+    assert body["embedding_model_available"] is True
+    assert body["ollama_models"] == ["qwen2.5:3b", "nomic-embed-text"]
+
+
+def test_health_reports_degraded_when_embedding_model_missing(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Thiếu model embedding: health phải báo degraded + issue riêng để UI cảnh báo."""
+    use_provider(monkeypatch, FakeProvider())
+    body = client.get("/api/health").json()
+    assert body["status"] == "degraded"
+    assert "embedding_model_missing" in body["issues"]
+    assert body["embedding_model_available"] is False
+    assert body["embedding_model"] == "nomic-embed-text"
+
+
+async def _list_models_with_embedding() -> list[str]:
+    return ["qwen2.5:3b", "nomic-embed-text"]
 
 
 def test_health_reports_degraded_when_configured_model_missing(

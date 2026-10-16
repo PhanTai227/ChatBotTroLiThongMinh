@@ -64,6 +64,8 @@ export type DocumentItem = {
   file_size_kb: number | null;
   page_count: number | null;
   created_at: string;
+  /** Thông tin job xử lý gần nhất (có khi polling /status), dùng để hiện lỗi thật. */
+  job?: DocumentStatusJob | null;
 };
 
 export type DocumentListResponse = {
@@ -74,6 +76,17 @@ export type DocumentListResponse = {
   offset: number;
 };
 
+export type DocumentStatusJob = {
+  id: number;
+  document_id: number;
+  stage: string;
+  status: string;
+  attempts: number;
+  last_error: string | null;
+  next_retry_at: string | null;
+  updated_at: string;
+};
+
 export type DocumentStatusResponse = {
   id: number;
   status: DocumentItem['status'];
@@ -81,6 +94,7 @@ export type DocumentStatusResponse = {
   page_count: number | null;
   extract_method: string | null;
   chunk_count: number;
+  job: DocumentStatusJob | null;
 };
 
 export type Citation = {

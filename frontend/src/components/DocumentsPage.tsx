@@ -10,6 +10,7 @@ import {
   List,
   Loader2,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   UploadCloud,
@@ -98,6 +99,9 @@ export function DocumentsPage() {
   const [subjectTag, setSubjectTag] = useState('');
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [retryingId, setRetryingId] = useState<number | null>(null);
+  /** Cảnh báo khi máy AI thiếu model embedding (tài liệu sẽ kẹt ở 85%). */
+  const [embeddingWarning, setEmbeddingWarning] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadDocuments = useCallback(async () => {
@@ -117,6 +121,26 @@ export function DocumentsPage() {
 
   useEffect(() => {
     void loadDocuments();
+    // Kiểm tra model embedding ngay khi mở trang: báo trước để người dùng
+    // không phải đoán mò khi tài liệu kẹt ở 85%.
+    apiRequest<{
+      embedding_model_available: boolean;
+      embedding_model: string;
+      ollama: string;
+    }>('/api/health')
+      .then((health) => {
+        if (health.ollama !== 'connected') {
+          setEmbeddingWarning('Không kết nối được máy AI (Ollama). Hãy mở Ollama rồi tải lại trang.');
+        } else if (!health.embedding_model_available) {
+          setEmbeddingWarning(
+            `Máy AI chưa có model embedding '${health.embedding_model}' — tài liệu sẽ kẹt ở 85%. ` +
+            `Hãy mở PowerShell chạy: ollama pull ${health.embedding_model}`,
+          );
+        } else {
+          setEmbeddingWarning('');
+        }
+      })
+      .catch(() => undefined);
   }, [loadDocuments]);
 
   // Tài liệu đang xử lý nền cần hỏi lại trạng thái cho tới khi sẵn sàng hoặc lỗi.
@@ -184,6 +208,20 @@ export function DocumentsPage() {
     }
   };
 
+  /** Chạy lại xử lý cho tài liệu kẹt ở 85% hoặc đã lỗi. */
+  const retryDocument = async (documentId: number) => {
+    setError('');
+    setRetryingId(documentId);
+    try {
+      const updated = await apiRequest<DocumentItem>(`/api/documents/${documentId}/retry`, { method: 'POST' });
+      setDocuments((items) => items.map((item) => (item.id === documentId ? { ...item, ...updated } : item)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Không chạy lại được tài liệu.');
+    } finally {
+      setRetryingId(null);
+    }
+  };
+
   return (
     <>
       <section className="animate-fade-up flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
@@ -206,6 +244,14 @@ export function DocumentsPage() {
           <X className="mt-0.5 shrink-0" size={17} />
           <span className="flex-1">{error}</span>
           <button aria-label="Đóng thông báo" onClick={() => setError('')}><X size={15} /></button>
+        </div>
+      )}
+
+      {embeddingWarning && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-semibold text-amber-800">
+          <Clock3 className="mt-0.5 shrink-0" size={17} />
+          <span className="flex-1">{embeddingWarning}</span>
+          <button aria-label="Đóng cảnh báo" onClick={() => setEmbeddingWarning('')}><X size={15} /></button>
         </div>
       )}
 
@@ -234,6 +280,27 @@ export function DocumentsPage() {
               <div className="mt-5 flex items-center justify-between text-xs text-muted"><span>{formatFileSize(doc.file_size_kb)} • {doc.page_count ? `${doc.page_count} trang` : 'chưa rõ số trang'}</span><span className={`pill ${statusStyle(doc.status)}`}>{viewStyle(doc.status)}</span></div>
               <div className="mt-4 flex items-center gap-3"><div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#efece3]"><div className={`h-full rounded-full ${doc.status === 'error' ? 'bg-rose-400' : 'bg-accent'}`} style={{ width: `${progressOf(doc.status)}%` }} /></div><span className="text-[10px] font-bold text-muted">{progressOf(doc.status)}%</span></div>
               <p className="mt-3 truncate text-[11px] text-muted" title={doc.error_message ?? undefined}>{doc.status === 'error' && doc.error_message ? doc.error_message : `Cập nhật ${relativeTime(doc.created_at)}`}</p>
+              {(doc.status === 'embedding' || doc.status === 'error') && (
+                <div className="mt-3 rounded-lg bg-paper p-3">
+                  <p className="text-[11px] leading-5 text-muted">
+                    {doc.status === 'embedding' && !doc.job?.last_error
+                      ? 'Đang tạo vector tìm kiếm (85%)…'
+                      : (doc.job?.last_error || doc.error_message || 'Xử lý thất bại.')}
+                  </p>
+                  {(doc.job?.last_error?.includes('embedding') || doc.job?.last_error?.includes('Ollama')) && (
+                    <p className="mt-1 text-[11px] font-semibold leading-5 text-amber-700">
+                      Cách sửa: mở PowerShell chạy `ollama pull nomic-embed-text` rồi bấm Thử lại bên dưới.
+                    </p>
+                  )}
+                  <button
+                    onClick={() => void retryDocument(doc.id)}
+                    disabled={retryingId === doc.id}
+                    className="btn btn-outline mt-2 px-3 py-2 text-xs"
+                  >
+                    {retryingId === doc.id ? (<><Loader2 className="animate-spin" size={14} />Đang thử lại…</>) : (<><RefreshCw size={14} />Thử lại</>)}
+                  </button>
+                </div>
+              )}
             </article>
           ))}
         </section>
