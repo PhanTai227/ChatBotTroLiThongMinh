@@ -24,11 +24,12 @@ from ..deps import get_current_user
 from ..repositories import citations as citations_repo
 from ..repositories import conversations as conversations_repo
 from ..repositories import documents as documents_repo
+from ..repositories import feedback as feedback_repo
 from ..repositories import progress as progress_repo
 from ..repositories import settings_repo
-from ..schemas import ChatRequest, ChatResponse, Citation
-from ..services import retrieval
+from ..schemas import ChatRequest, ChatResponse, Citation, MessageFeedbackRequest
 from ..services import embeddings as embeddings_service
+from ..services import retrieval
 from ..services.embeddings import EmbeddingError, EmbeddingUnavailable
 from ..services.llm import (
     HISTORY_MESSAGE_LIMIT,
@@ -124,8 +125,22 @@ async def health() -> dict:
     }
 
 
+@router.post("/api/chat/messages/{message_id}/feedback")
+async def rate_chat_message(
+    message_id: int,
+    payload: MessageFeedbackRequest,
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Lưu lượt thích hoặc không thích cho câu trả lời AI của chính người dùng."""
+    user = get_current_user(request, authorization)
+    if not feedback_repo.rate_message(message_id, int(user["id"]), payload.rating):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy câu trả lời.")
+    return {"message_id": message_id, "rating": payload.rating}
+
+
 async def _find_context(
-    owner_id: int, message: str, document_id: int | None
+    owner_id: int, message: str, document_ids: list[int]
 ) -> list[retrieval.RetrievedChunk]:
     """Tìm ngữ cảnh trong tài liệu của người dùng.
 
@@ -133,7 +148,7 @@ async def _find_context(
     không có ngữ cảnh, vì hệ thống vẫn phải trả lời được bằng LLM thuần.
     """
     try:
-        return await retrieval.search(owner_id, message, document_id)
+        return await retrieval.search(owner_id, message, document_ids)
     except EmbeddingUnavailable as exc:
         logger.warning("Không sinh được vector cho câu hỏi: %s", exc)
         return []
@@ -167,28 +182,27 @@ def _save_citations(message_id: int, chunks: list[retrieval.RetrievedChunk]) -> 
     return citations
 
 
-def _ready_document_ids(owner_id: int) -> list[int]:
-    """Các tài liệu đã xử lý xong của người dùng, tức là có thể truy hồi."""
-    return [int(row["id"]) for row in documents_repo.list_by_status("ready", owner_id)]
-
-
-def _history_messages(conversation_id: int, question: str) -> list[dict[str, str]]:
+def _history_messages(
+    conversation_id: int, question: str, document_scope: str
+) -> list[dict[str, str]]:
     """Các lượt hỏi đáp trước đó trong hội thoại, mới nhất nằm cuối.
 
     `start_turn` đã lưu câu hỏi hiện tại ở cuối danh sách nên nó phải bị loại ra,
     nếu không AI sẽ thấy chính câu hỏi của mình lặp lại.
     """
-    rows = conversations_repo.list_messages(conversation_id)
+    rows = conversations_repo.list_messages_for_scope(conversation_id, document_scope)
     if rows and str(rows[-1]["role"]) == "user" and str(rows[-1]["content"]) == question:
         rows = rows[:-1]
     history = [{"role": str(row["role"]), "content": str(row["content"])} for row in rows]
     return history[-HISTORY_MESSAGE_LIMIT:]
 
 
-def _subject_of_chunks(chunks: list[retrieval.RetrievedChunk], document_id: int | None) -> str | None:
+def _subject_of_chunks(
+    chunks: list[retrieval.RetrievedChunk], document_ids: list[int]
+) -> str | None:
     """Môn học gắn với câu hỏi, suy ra từ tài liệu được trích dẫn (dùng cho tiến độ)."""
-    if document_id:
-        document = documents_repo.get_by_id(document_id)
+    if document_ids:
+        document = documents_repo.get_by_id(document_ids[0])
         if document and document["subject_tag"]:
             return str(document["subject_tag"])
     for chunk in chunks:
@@ -224,37 +238,37 @@ def _map_ai_error(exc: LLMError) -> HTTPException:
 
 async def _prepare_turn(
     payload: ChatRequest, owner_id: int
-) -> tuple[int, str, list[retrieval.RetrievedChunk]]:
+) -> tuple[int, str, list[retrieval.RetrievedChunk], list[int], str]:
     """Chuẩn bị lượt hỏi: kiểm tra quyền, lưu câu hỏi, tìm ngữ cảnh.
 
     Trả về (conversation_id, message, context_chunks).
     """
     message = payload.message.strip()
-    # Tài liệu được chỉ định phải là của chính người hỏi, nếu không sẽ báo 404.
-    if payload.document_id is not None and not documents_repo.get_owned(payload.document_id, owner_id):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tài liệu."
-        )
+    # Tài liệu được chọn phải là của chính người hỏi, nếu không sẽ báo 404.
+    selected_document_ids = list(payload.document_ids)
+    if payload.document_id is not None and payload.document_id not in selected_document_ids:
+        selected_document_ids.append(payload.document_id)
+    selected_document_ids.sort()
+    if any(not documents_repo.get_owned(document_id, owner_id) for document_id in selected_document_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy tài liệu.")
+    document_scope = json.dumps(selected_document_ids, separators=(",", ":"))
 
     try:
-        conversation_id = conversations_repo.start_turn(owner_id, message, payload.conversation_id)
+        conversation_id = conversations_repo.start_turn(
+            owner_id, message, payload.conversation_id, document_scope
+        )
     except conversations_repo.ConversationNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy cuộc hội thoại."
         ) from exc
 
-    # Tối ưu: chỉ truy hồi tài liệu khi người dùng thực sự đã có tài liệu xử lý xong.
-    # Nhờ vậy câu hỏi thông thường không tốn thêm một lượt gọi mô hình nhúng.
-    ready_document_ids = _ready_document_ids(owner_id)
-    should_retrieve = payload.document_id is not None or bool(ready_document_ids)
-    context_chunks = (
-        await _find_context(owner_id, message, payload.document_id) if should_retrieve else []
-    )
-    return conversation_id, message, context_chunks
+    # Không chọn tài liệu là chế độ hỏi tự do nên không truy hồi bất kỳ tài liệu nào.
+    context_chunks = await _find_context(owner_id, message, selected_document_ids) if selected_document_ids else []
+    return conversation_id, message, context_chunks, selected_document_ids, document_scope
 
 
 def _build_prompt(
-    conversation_id: int, message: str, context: str
+    conversation_id: int, message: str, context: str, document_scope: str
 ) -> list[dict[str, str]]:
     """Ghép prompt: câu dẫn hệ thống + lịch sử hội thoại + câu hỏi (kèm ngữ cảnh)."""
     system_prompt = RAG_SYSTEM_PROMPT if context else SYSTEM_PROMPT
@@ -262,7 +276,7 @@ def _build_prompt(
         f"NGỮ CẢNH TỪ TÀI LIỆU:\n{context}\n\nCÂU HỎI: {message}" if context else message
     )
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
-    messages.extend(_history_messages(conversation_id, message))
+    messages.extend(_history_messages(conversation_id, message, document_scope))
     messages.append({"role": "user", "content": user_content})
     return messages
 
@@ -281,17 +295,20 @@ async def chat(
     """
     user = get_current_user(request, authorization)
     owner_id = int(user["id"])
-    conversation_id, message, context_chunks = await _prepare_turn(payload, owner_id)
+    conversation_id, message, context_chunks, selected_document_ids, document_scope = await _prepare_turn(
+        payload, owner_id
+    )
     context = retrieval.build_context(context_chunks)
 
-    # Chỉ nói "chưa đủ thông tin" khi người dùng yêu cầu trả lời từ MỘT tài liệu cụ thể
-    # mà tài liệu đó không có phần nào liên quan (NFR-4).
-    if payload.document_id is not None and not context:
-        conversations_repo.add_message(conversation_id, "assistant", NO_CONTEXT_ANSWER)
-        progress_repo.record_question(owner_id, _subject_of_chunks([], payload.document_id))
+    # Khi đã chọn tài liệu, mọi câu trả lời phải có căn cứ từ phạm vi đã chọn (NFR-4).
+    if selected_document_ids and not context:
+        conversations_repo.add_message(
+            conversation_id, "assistant", NO_CONTEXT_ANSWER, document_scope
+        )
+        progress_repo.record_question(owner_id, _subject_of_chunks([], selected_document_ids))
         logger.info(
-            "Tài liệu %s không có ngữ cảnh liên quan (hội thoại %s).",
-            payload.document_id,
+            "Các tài liệu %s không có ngữ cảnh liên quan (hội thoại %s).",
+            selected_document_ids,
             conversation_id,
         )
         return ChatResponse(
@@ -302,16 +319,18 @@ async def chat(
         )
 
     model = await resolve_model()
-    messages = _build_prompt(conversation_id, message, context)
+    messages = _build_prompt(conversation_id, message, context, document_scope)
 
     try:
         result = await get_provider().generate(messages, model)
     except LLMError as exc:
         raise _map_ai_error(exc) from exc
 
-    message_id = conversations_repo.add_message(conversation_id, "assistant", result.content)
+    message_id = conversations_repo.add_message(
+        conversation_id, "assistant", result.content, document_scope
+    )
     citations = _save_citations(message_id, context_chunks) if context else []
-    progress_repo.record_question(owner_id, _subject_of_chunks(context_chunks, payload.document_id))
+    progress_repo.record_question(owner_id, _subject_of_chunks(context_chunks, selected_document_ids))
     return ChatResponse(
         answer=result.content,
         conversation_id=conversation_id,
@@ -343,12 +362,16 @@ async def chat_stream(
     """
     user = get_current_user(request, authorization)
     owner_id = int(user["id"])
-    conversation_id, message, context_chunks = await _prepare_turn(payload, owner_id)
+    conversation_id, message, context_chunks, selected_document_ids, document_scope = await _prepare_turn(
+        payload, owner_id
+    )
     context = retrieval.build_context(context_chunks)
 
-    if payload.document_id is not None and not context:
-        conversations_repo.add_message(conversation_id, "assistant", NO_CONTEXT_ANSWER)
-        progress_repo.record_question(owner_id, _subject_of_chunks([], payload.document_id))
+    if selected_document_ids and not context:
+        no_context_message_id = conversations_repo.add_message(
+            conversation_id, "assistant", NO_CONTEXT_ANSWER, document_scope
+        )
+        progress_repo.record_question(owner_id, _subject_of_chunks([], selected_document_ids))
         fallback = NO_CONTEXT_ANSWER
         model = await resolve_model()
 
@@ -362,7 +385,7 @@ async def chat_stream(
                 }
             )
             yield _sse({"type": "delta", "text": fallback})
-            yield _sse({"type": "done"})
+            yield _sse({"type": "done", "message_id": no_context_message_id})
 
         return StreamingResponse(
             no_context_stream(),
@@ -371,7 +394,7 @@ async def chat_stream(
         )
 
     model = await resolve_model()
-    messages = _build_prompt(conversation_id, message, context)
+    messages = _build_prompt(conversation_id, message, context, document_scope)
     provider = get_provider()
 
     async def event_stream() -> AsyncIterator[str]:
@@ -398,11 +421,13 @@ async def chat_stream(
             yield _sse({"type": "error", "detail": "AI local không trả về nội dung."})
             return
 
-        message_id = conversations_repo.add_message(conversation_id, "assistant", answer)
+        message_id = conversations_repo.add_message(
+            conversation_id, "assistant", answer, document_scope
+        )
         citations = _save_citations(message_id, context_chunks) if context else []
-        progress_repo.record_question(owner_id, _subject_of_chunks(context_chunks, payload.document_id))
+        progress_repo.record_question(owner_id, _subject_of_chunks(context_chunks, selected_document_ids))
         yield _sse({"type": "citations", "items": [item.model_dump() for item in citations]})
-        yield _sse({"type": "done"})
+        yield _sse({"type": "done", "message_id": message_id})
 
     return StreamingResponse(
         event_stream(),

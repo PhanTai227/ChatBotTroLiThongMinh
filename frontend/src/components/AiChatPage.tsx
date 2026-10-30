@@ -4,7 +4,6 @@ import { MATH_FONTS, MathMarkdown, getMathFont, setMathFont, type MathFontId } f
 import {
   Bot,
   BookOpen,
-  ChevronDown,
   FileText,
   Lightbulb,
   Menu,
@@ -13,6 +12,8 @@ import {
   Send,
   Sparkles,
   Trash2,
+  ThumbsDown,
+  ThumbsUp,
   X,
 } from 'lucide-react';
 
@@ -22,6 +23,8 @@ type ChatMessage = {
   content: string;
   time: string;
   citations?: { title: string; page: string }[];
+  backendId?: number;
+  rating?: number | null;
 };
 
 type ConversationItem = {
@@ -36,6 +39,7 @@ type LoadedMessage = {
   role: 'user' | 'assistant';
   content: string;
   created_at: string;
+  user_rating?: number | null;
 };
 
 const suggestions = [
@@ -58,7 +62,52 @@ function formatTime(value: string) {
   return date.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' });
 }
 
-function MessageItem({ message, mathFont }: { message: ChatMessage; mathFont: MathFontId }) {
+function DocumentScopePicker({
+  documents,
+  selectedIds,
+  onToggle,
+}: {
+  documents: DocumentItem[];
+  selectedIds: number[];
+  onToggle: (documentId: number) => void;
+}) {
+  const label = selectedIds.length === 0
+    ? 'Hỏi tự do'
+    : `${selectedIds.length} tài liệu đã chọn`;
+  return (
+    <details className="relative min-w-0">
+      <summary className="flex h-10 cursor-pointer list-none items-center gap-2 rounded-lg border border-line px-3 text-xs font-semibold text-ink hover:border-accent">
+        <BookOpen size={15} className="shrink-0 text-muted" />
+        <span className="truncate">{label}</span>
+      </summary>
+      <div className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-line bg-surface p-3 shadow-lg">
+        <p className="mb-2 text-xs font-semibold text-ink">Phạm vi trả lời</p>
+        <p className="mb-3 text-[11px] leading-4 text-muted">Không tích tài liệu nào để hỏi tự do. Khi tích tài liệu, AI chỉ trả lời từ các tài liệu đó.</p>
+        {documents.length === 0 && <p className="text-xs text-muted">Chưa có tài liệu nào đã xử lý xong.</p>}
+        <div className="max-h-52 space-y-2 overflow-y-auto pr-1">
+          {documents.map((document) => (
+            <label key={document.id} className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-paper">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(document.id)}
+                onChange={() => onToggle(document.id)}
+                className="mt-0.5 size-4 accent-[var(--color-accent)]"
+              />
+              <span className="min-w-0 break-words text-xs leading-5 text-ink">{document.file_name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function MessageItem({ message, mathFont, onRate, ratingSaving }: {
+  message: ChatMessage;
+  mathFont: MathFontId;
+  onRate: (messageId: number, rating: 1 | -1) => void;
+  ratingSaving: boolean;
+}) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end gap-3">
@@ -86,6 +135,21 @@ function MessageItem({ message, mathFont }: { message: ChatMessage; mathFont: Ma
               </div>
             </div>
           )}
+          {message.backendId && (
+            <div className="mt-3 flex items-center gap-2 border-t border-line pt-2">
+              <span className="text-[11px] text-muted">Câu trả lời này hữu ích?</span>
+              <button type="button" aria-label="Thích câu trả lời" aria-pressed={message.rating === 1}
+                disabled={ratingSaving} onClick={() => onRate(message.backendId!, 1)}
+                className={`rounded-md p-1.5 transition hover:bg-accent-soft disabled:opacity-50 ${message.rating === 1 ? 'text-accent' : 'text-muted'}`}>
+                <ThumbsUp size={15} />
+              </button>
+              <button type="button" aria-label="Không thích câu trả lời" aria-pressed={message.rating === -1}
+                disabled={ratingSaving} onClick={() => onRate(message.backendId!, -1)}
+                className={`rounded-md p-1.5 transition hover:bg-rose-50 disabled:opacity-50 ${message.rating === -1 ? 'text-rose-600' : 'text-muted'}`}>
+                <ThumbsDown size={15} />
+              </button>
+            </div>
+          )}
           <p className="mt-2 text-right text-[10px] text-muted">{message.time}</p>
         </div>
       </div>
@@ -98,7 +162,7 @@ export function AiChatPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
-  const [selectedDocumentId, setSelectedDocumentId] = useState<string>('all');
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -106,11 +170,19 @@ export function AiChatPage() {
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState('');
   const [mathFont, setMathFontState] = useState<MathFontId>(() => getMathFont());
+  const [ratingSavingId, setRatingSavingId] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const changeMathFont = (font: MathFontId) => {
     setMathFontState(font);
     setMathFont(font);
+  };
+
+  const toggleDocument = (documentId: number) => {
+    setSelectedDocumentIds((previous) => previous.includes(documentId)
+      ? previous.filter((id) => id !== documentId)
+      : [...previous, documentId],
+    );
   };
 
   const loadConversations = async () => {
@@ -152,6 +224,8 @@ export function AiChatPage() {
           role: item.role,
           content: item.content,
           time: formatTime(item.created_at),
+          backendId: item.role === 'assistant' ? item.id : undefined,
+          rating: item.user_rating,
         })),
       );
     } catch (requestError) {
@@ -173,6 +247,23 @@ export function AiChatPage() {
     }
   };
 
+  const rateMessage = async (messageId: number, rating: 1 | -1) => {
+    setRatingSavingId(messageId);
+    try {
+      await apiRequest(`/api/chat/messages/${messageId}/feedback`, {
+        method: 'POST',
+        body: JSON.stringify({ rating }),
+      });
+      setMessages((previous) => previous.map((item) =>
+        item.backendId === messageId ? { ...item, rating } : item,
+      ));
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Không lưu được đánh giá.');
+    } finally {
+      setRatingSavingId(null);
+    }
+  };
+
   const sendMessage = async (text: string) => {
     const question = text.trim();
     if (!question || streaming || thinking) return;
@@ -189,12 +280,10 @@ export function AiChatPage() {
     setMessages((previous) => [...previous, userMessage]);
     setInput('');
 
-    const documentId = selectedDocumentId === 'all' ? undefined : Number(selectedDocumentId);
-
     try {
       await apiStream(
         '/api/chat/stream',
-        { message: question, conversation_id: activeConversationId, document_id: documentId },
+        { message: question, conversation_id: activeConversationId, document_ids: selectedDocumentIds },
         (event) => {
           if (event.type === 'meta') {
             setActiveConversationId(event.conversation_id);
@@ -226,6 +315,11 @@ export function AiChatPage() {
           }
           if (event.type === 'error') {
             throw new Error(event.detail);
+          }
+          if (event.type === 'done' && event.message_id) {
+            setMessages((previous) => previous.map((item) =>
+              item.id === assistantId ? { ...item, backendId: event.message_id } : item,
+            ));
           }
         },
       );
@@ -279,7 +373,7 @@ export function AiChatPage() {
           <button aria-label="Mở danh sách hội thoại" onClick={() => setSidebarOpen((open) => !open)} className="rounded-lg p-2 text-muted hover:bg-[#f1eee6] hover:text-ink lg:hidden"><Menu size={18} /></button>
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-white"><Bot size={18} /></div>
           <div className="min-w-0 flex-1"><h1 className="truncate text-sm font-semibold text-ink">Trợ lý học tập AI</h1><p className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted"><span className="size-1.5 rounded-full bg-emerald-500" />{streaming ? 'Đang trả lời...' : 'Sẵn sàng hỗ trợ'}</p></div>
-          <label className="hidden max-w-[310px] flex-1 items-center gap-2 rounded-lg border border-line px-3 md:flex"><BookOpen size={15} className="shrink-0 text-muted" /><select aria-label="Chọn tài liệu" value={selectedDocumentId} onChange={(e) => setSelectedDocumentId(e.target.value)} className="h-10 min-w-0 flex-1 bg-transparent text-xs font-semibold text-ink outline-none"><option value="all">Tất cả tài liệu</option>{documents.map((document) => <option key={document.id} value={String(document.id)}>{document.file_name}</option>)}</select><ChevronDown size={14} /></label>
+          <div className="hidden md:block"><DocumentScopePicker documents={documents} selectedIds={selectedDocumentIds} onToggle={toggleDocument} /></div>
         </header>
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-paper px-4 py-2 sm:px-7">
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">Font công thức:</span>
@@ -310,7 +404,7 @@ export function AiChatPage() {
                 </div>
               </div>
             )}
-            {messages.map((message) => <MessageItem key={message.id} message={message} mathFont={mathFont} />)}
+            {messages.map((message) => <MessageItem key={message.id} message={message} mathFont={mathFont} onRate={(id, rating) => void rateMessage(id, rating)} ratingSaving={ratingSavingId === message.backendId} />)}
             {thinking && <div className="flex gap-3"><div className="grid size-9 place-items-center rounded-lg bg-accent text-white"><Sparkles size={17} /></div><div className="rounded-2xl rounded-tl-md border border-line bg-surface px-4 py-3 text-sm text-muted">AI local đang phân tích câu hỏi<span className="ml-1 inline-flex gap-1"><i className="size-1 animate-pulse rounded-full bg-accent" /><i className="size-1 animate-pulse rounded-full bg-accent [animation-delay:200ms]" /><i className="size-1 animate-pulse rounded-full bg-accent [animation-delay:400ms]" /></span></div></div>}
             {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</div>}
             <div ref={bottomRef} />
@@ -320,7 +414,7 @@ export function AiChatPage() {
         <footer className="border-t border-line bg-surface p-3 sm:p-4">
           <div className="mx-auto max-w-4xl">
             <div className="flex items-end gap-2 md:hidden">
-              <label className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-line px-3"><BookOpen size={15} className="shrink-0 text-muted" /><select aria-label="Chọn tài liệu" value={selectedDocumentId} onChange={(e) => setSelectedDocumentId(e.target.value)} className="h-10 min-w-0 flex-1 bg-transparent text-xs font-semibold text-ink outline-none"><option value="all">Tất cả tài liệu</option>{documents.map((document) => <option key={document.id} value={String(document.id)}>{document.file_name}</option>)}</select><ChevronDown size={14} /></label>
+              <div className="min-w-0 flex-1"><DocumentScopePicker documents={documents} selectedIds={selectedDocumentIds} onToggle={toggleDocument} /></div>
               <button onClick={newChat} aria-label="Hội thoại mới" className="grid size-10 shrink-0 place-items-center rounded-lg border border-line text-muted hover:text-accent"><MessageSquarePlus size={17} /></button>
             </div>
             <div className="mt-2 flex items-end gap-2 rounded-xl border border-line bg-surface p-2 transition focus-within:border-accent focus-within:ring-4 focus-within:ring-accent/15">

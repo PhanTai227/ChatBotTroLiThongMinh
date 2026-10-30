@@ -133,6 +133,15 @@ async def admin_feedback(request: Request, authorization: str | None = Header(de
     return {"items": feedback_repo.list_all()}
 
 
+@router.get("/message-feedback")
+async def admin_message_feedback(
+    request: Request, authorization: str | None = Header(default=None)
+) -> dict:
+    """Đánh giá thích/không thích trên từng câu trả lời của AI."""
+    _admin(request, authorization)
+    return {"items": feedback_repo.list_message_ratings()}
+
+
 @router.patch("/feedback/{feedback_id}")
 async def mark_feedback_read(
     feedback_id: int,

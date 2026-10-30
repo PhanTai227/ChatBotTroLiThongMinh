@@ -27,7 +27,10 @@ async def get_conversation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Không tìm thấy hội thoại."
         )
-    return {**dict(row), "messages": conversations_repo.list_messages(conversation_id)}
+    return {
+        **dict(row),
+        "messages": conversations_repo.list_messages(conversation_id, int(user["id"])),
+    }
 
 
 @router.delete("/{conversation_id}")

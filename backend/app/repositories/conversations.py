@@ -35,20 +35,35 @@ def is_accessible(conversation_id: int, user_id: int) -> bool:
     return row is not None
 
 
-def add_message(conversation_id: int, role: str, content: str) -> int:
+def add_message(conversation_id: int, role: str, content: str, document_scope: str = "[]") -> int:
     with transaction() as connection:
         cursor = connection.execute(
-            "INSERT INTO messages(conversation_id, role, content) VALUES (?, ?, ?)",
-            (conversation_id, role, content),
+            """INSERT INTO messages(conversation_id, role, content, document_scope)
+               VALUES (?, ?, ?, ?)""",
+            (conversation_id, role, content, document_scope),
         )
         return int(cursor.lastrowid)
 
 
-def list_messages(conversation_id: int) -> list[dict]:
+def list_messages(conversation_id: int, user_id: int | None = None) -> list[dict]:
     with read_connection() as connection:
         rows = connection.execute(
-            "SELECT id, role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY id",
-            (conversation_id,),
+            """SELECT m.id, m.role, m.content, m.document_scope, m.created_at, mf.rating AS user_rating
+               FROM messages m LEFT JOIN message_feedback mf
+                 ON mf.message_id = m.id AND mf.user_id = ?
+               WHERE m.conversation_id = ? ORDER BY m.id""",
+            (user_id, conversation_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_messages_for_scope(conversation_id: int, document_scope: str) -> list[dict]:
+    """Tin nhắn cùng phạm vi để tạo lịch sử an toàn cho lần hỏi tiếp theo."""
+    with read_connection() as connection:
+        rows = connection.execute(
+            """SELECT id, role, content, created_at FROM messages
+               WHERE conversation_id = ? AND document_scope = ? ORDER BY id""",
+            (conversation_id, document_scope),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -91,7 +106,9 @@ def delete_conversation(conversation_id: int, user_id: int) -> bool:
         return bool(cursor.rowcount)
 
 
-def start_turn(user_id: int, message: str, conversation_id: int | None) -> int:
+def start_turn(
+    user_id: int, message: str, conversation_id: int | None, document_scope: str = "[]"
+) -> int:
     """Mở lượt hỏi đáp: tạo hội thoại nếu cần và lưu câu hỏi, trong cùng một transaction.
 
     Trả về conversation_id. Ném ConversationNotFound nếu hội thoại không thuộc về user.
@@ -112,7 +129,8 @@ def start_turn(user_id: int, message: str, conversation_id: int | None) -> int:
                 raise ConversationNotFound
             resolved_id = conversation_id
         connection.execute(
-            "INSERT INTO messages(conversation_id, role, content) VALUES (?, 'user', ?)",
-            (resolved_id, message),
+            """INSERT INTO messages(conversation_id, role, content, document_scope)
+               VALUES (?, 'user', ?, ?)""",
+            (resolved_id, message, document_scope),
         )
     return resolved_id

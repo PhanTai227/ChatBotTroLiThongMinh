@@ -75,6 +75,58 @@ def test_chat_with_context_returns_citations(
     assert "DỰA TRÊN CHÍNH CÁC TRÍCH ĐOẠN" in sent[0]["content"]
 
 
+def test_chat_uses_only_checked_documents(
+    client: TestClient, monkeypatch, make_user, docx_factory
+) -> None:
+    """Danh sách tài liệu được chọn là phạm vi duy nhất của câu trả lời RAG."""
+    provider = FakeProvider(content="Câu trả lời theo tài liệu đã chọn [1].")
+    use_provider(monkeypatch, provider)
+    token, _ = make_user()
+    selected_document_id = _upload_knowledge(client, token, docx_factory)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": QUESTION, "document_ids": [selected_document_id]},
+        headers=auth_header(token),
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["used_documents"] is True
+    assert body["citations"]
+    assert {citation["document_id"] for citation in body["citations"]} == {selected_document_id}
+
+
+def test_document_scope_excludes_free_chat_history(
+    client: TestClient, monkeypatch, make_user, docx_factory
+) -> None:
+    """Chuyển sang hỏi theo tài liệu không được dùng câu trả lời cũ ở chế độ tự do."""
+    free_answer = "Thông tin chỉ có trong câu trả lời hỏi tự do."
+    provider = FakeProvider(content=free_answer)
+    use_provider(monkeypatch, provider)
+    token, _ = make_user()
+
+    first = client.post(
+        "/api/chat", json={"message": "Câu hỏi tự do"}, headers=auth_header(token)
+    ).json()
+    document_id = _upload_knowledge(client, token, docx_factory)
+    provider.content = "Câu trả lời chỉ dựa trên tài liệu [1]."
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": QUESTION,
+            "conversation_id": first["conversation_id"],
+            "document_ids": [document_id],
+        },
+        headers=auth_header(token),
+    )
+
+    assert response.status_code == 200, response.text
+    sent_contents = [item["content"] for item in provider.calls[-1][0]]
+    assert free_answer not in sent_contents
+
+
 def test_chat_saves_citations_to_database(
     client: TestClient, monkeypatch, make_user, docx_factory
 ) -> None:

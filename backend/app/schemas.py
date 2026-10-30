@@ -55,8 +55,10 @@ class Citation(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4000)
     conversation_id: int | None = None
-    # Giới hạn câu hỏi trong một tài liệu cụ thể; bỏ trống thì tìm trong tất cả tài liệu của tôi.
+    # Tương thích ngược với client cũ chỉ chọn một tài liệu.
     document_id: int | None = None
+    # Có phần tử thì chat chỉ được trả lời từ các tài liệu này. Rỗng là chế độ hỏi tự do.
+    document_ids: list[int] = Field(default_factory=list, max_length=20)
 
     @field_validator("message")
     @classmethod
@@ -65,6 +67,13 @@ class ChatRequest(BaseModel):
         if not cleaned:
             raise ValueError("câu hỏi không được để trống hoặc chỉ gõ khoảng trắng")
         return cleaned
+
+    @field_validator("document_ids")
+    @classmethod
+    def _document_ids_valid(cls, values: list[int]) -> list[int]:
+        if any(value < 1 for value in values):
+            raise ValueError("mỗi tài liệu phải có mã hợp lệ")
+        return list(dict.fromkeys(values))
 
 
 class ChatResponse(BaseModel):
@@ -100,6 +109,16 @@ class FeedbackCreate(BaseModel):
             raise ValueError("nội dung phản hồi không được để trống")
         return cleaned
 
+
+class MessageFeedbackRequest(BaseModel):
+    rating: int = Field(description="1 là thích, -1 là không thích")
+
+    @field_validator("rating")
+    @classmethod
+    def _message_rating_valid(cls, value: int) -> int:
+        if value not in {-1, 1}:
+            raise ValueError("rating phải là 1 hoặc -1")
+        return value
 
 class FeedbackReply(BaseModel):
     """Quản trị viên trả lời một phản hồi."""

@@ -46,13 +46,13 @@ def make_snippet(content: str) -> str:
 async def search(
     owner_id: int,
     question: str,
-    document_id: int | None = None,
+    document_ids: list[int] | None = None,
     top_k: int | None = None,
 ) -> list[RetrievedChunk]:
     """Trả về các đoạn liên quan tới câu hỏi.
 
-    Chỉ tìm trong tài liệu của chính `owner_id`; nếu có `document_id` thì giới hạn
-    trong đúng tài liệu đó. Kết quả dưới `RAG_MIN_SCORE` bị loại để tránh dùng
+    Chỉ tìm trong tài liệu của chính `owner_id`; nếu có `document_ids` thì giới hạn
+    trong đúng các tài liệu đó. Kết quả dưới `RAG_MIN_SCORE` bị loại để tránh dùng
     ngữ cảnh không liên quan (NFR-4).
     """
     settings = get_settings()
@@ -60,11 +60,14 @@ async def search(
     if limit < 1:
         return []
 
-    if document_id is not None and not documents_repo.get_owned(document_id, owner_id):
+    if document_ids is not None and (
+        not document_ids
+        or any(not documents_repo.get_owned(document_id, owner_id) for document_id in document_ids)
+    ):
         return []
 
     query_vector = await embeddings.embed_query(question)
-    hits = vector_store.search(owner_id, query_vector, [document_id] if document_id else None, limit)
+    hits = vector_store.search(owner_id, query_vector, document_ids, limit)
 
     results: list[RetrievedChunk] = []
     seen: set[int] = set()

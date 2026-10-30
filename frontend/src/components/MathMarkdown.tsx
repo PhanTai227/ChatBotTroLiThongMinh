@@ -57,8 +57,32 @@ function balanceMathDelimiters(text: string): string {
   return parts.join('');
 }
 
+function normalizeMathDelimiters(text: string): string {
+  const parts = text.split(/(```[\s\S]*?(?:```|$))/g);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = parts[i]
+      .replace(/\\\[/g, () => '$$')
+      .replace(/\\\]/g, () => '$$')
+      .replace(/\\\(/g, '$')
+      .replace(/\\\)/g, '$')
+      .replace(
+        /\[\s*((?:[A-Za-z]\s*=\s*)?\\begin\{(?:p|b|B|v|V)?matrix\}[\s\S]*?\\end\{(?:p|b|B|v|V)?matrix\})\s*\]/g,
+        (_match, formula: string) => `$$${formula}$$`,
+      )
+      .replace(
+        /(\\begin\{(?:p|b|B|v|V)?matrix\})([\s\S]*?)(\\end\{(?:p|b|B|v|V)?matrix\})/g,
+        (_match, start: string, rows: string, end: string) =>
+          `${start}${rows.replace(/(?<!\\)\\\s+(?=[^\\])/g, '\\\\ ')}${end}`,
+      );
+  }
+  return parts.join('');
+}
+
 export function MathMarkdown({ content, font }: { content: string; font: MathFontId }) {
-  const safeContent = useMemo(() => balanceMathDelimiters(content), [content]);
+  const safeContent = useMemo(
+    () => normalizeMathDelimiters(balanceMathDelimiters(content)),
+    [content],
+  );
   return (
     <div className={`math-body math-font-${font}`}>
       <ReactMarkdown

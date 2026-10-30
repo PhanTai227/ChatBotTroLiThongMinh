@@ -119,7 +119,7 @@ export type ChatStreamEvent =
   | { type: 'meta'; conversation_id: number; model: string; used_documents: boolean }
   | { type: 'delta'; text: string }
   | { type: 'citations'; items: Citation[] }
-  | { type: 'done' }
+  | { type: 'done'; message_id?: number }
   | { type: 'error'; detail: string };
 
 /**

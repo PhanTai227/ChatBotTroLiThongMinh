@@ -27,12 +27,15 @@ Nếu câu hỏi cần thông tin chưa được cung cấp, hãy nói rõ bạn
 Với bài toán hoặc bài tập, trình bày từng bước và không chỉ đưa đáp án.
 Giữ câu trả lời vừa phải để phù hợp với giao diện web.
 QUY TẮC CÔNG THỨC TOÁN (bắt buộc):
-- Mọi công thức toán phải viết bằng LaTeX để giao diện hiển thị đẹp, không lỗi font.
-- Công thức trong dòng: bọc bằng \\( ... \\) (ví dụ: \\(x^2 + y^2 = r^2\\)).
-- Công thức khối đứng riêng dòng: bọc bằng $$ ... $$ trên dòng riêng.
-- KHÔNG dùng ký tự Unicode lạ để vẽ công thức (VD: ∫, ∑ viết tay, √ ghép ký tự);
-  hãy dùng lệnh LaTeX chuẩn (\\int, \\sum, \\sqrt, \\frac...).
-- KHÔNG bọc công thức bằng dấu backtick ` vì sẽ chặn render toán."""
+- Viết công thức bằng LaTeX chuẩn để giao diện hiển thị thành ký hiệu toán học đẹp; không để
+  công thức trong code block hoặc dấu backtick.
+- Công thức trong dòng dùng \\( ... \\); công thức riêng dòng dùng \\[ ... \\].
+- Với ma trận, dùng môi trường pmatrix, ngăn cột bằng &, ngăn hàng bằng \\\\ (hai dấu gạch chéo).
+  Ví dụ: \\[ A = \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} \\].
+- Khi tìm hạng ma trận, chỉ đếm hàng khác 0 sau khi đưa ma trận về dạng bậc thang; không đếm
+  hàng khác 0 ngay trên ma trận ban đầu. Giải thích phép biến đổi hoặc tính độc lập tuyến tính.
+- Không đặt công thức vào dấu ngoặc vuông thông thường thay cho delimiter LaTeX.
+- Sau công thức, giải thích bằng tiếng Việt ý nghĩa ký hiệu và các bước tính để người học hiểu."""
 
 # Câu dẫn khi có ngữ cảnh lấy từ tài liệu: bắt buộc bám theo ngữ cảnh và trích dẫn nguồn.
 RAG_SYSTEM_PROMPT = """Bạn là trợ lý học tập AI của hệ thống Mindora.
@@ -43,9 +46,15 @@ Hãy trả lời câu hỏi DỰA TRÊN CHÍNH CÁC TRÍCH ĐOẠN ĐÓ:
 - Mỗi ý chính phải kèm số nguồn dạng [1], [2] đúng với trích đoạn đã dùng.
 - Trả lời bằng tiếng Việt, rõ ràng, ngắn gọn, hợp với giao diện web.
 QUY TẮC CÔNG THỨC TOÁN (bắt buộc):
-- Mọi công thức toán phải viết bằng LaTeX: trong dòng dùng \\( ... \\), khối riêng dòng dùng $$ ... $$.
-- Dùng lệnh LaTeX chuẩn (\\frac, \\sqrt, \\sum, \\int...), không vẽ công thức bằng ký tự Unicode lạ,
-  không bọc công thức trong dấu backtick `."""
+- Viết công thức bằng LaTeX chuẩn để giao diện hiển thị thành ký hiệu toán học đẹp; không để
+  công thức trong code block hoặc dấu backtick.
+- Công thức trong dòng dùng \\( ... \\); công thức riêng dòng dùng \\[ ... \\].
+- Với ma trận, dùng môi trường pmatrix, ngăn cột bằng &, ngăn hàng bằng \\\\ (hai dấu gạch chéo).
+  Ví dụ: \\[ A = \\begin{pmatrix} 1 & 0 \\\\ 0 & 1 \\end{pmatrix} \\].
+- Khi tìm hạng ma trận, chỉ đếm hàng khác 0 sau khi đưa ma trận về dạng bậc thang; không đếm
+  hàng khác 0 ngay trên ma trận ban đầu.
+- Không đặt công thức vào dấu ngoặc vuông thông thường thay cho delimiter LaTeX.
+- Giải thích bằng tiếng Việt ý nghĩa ký hiệu và các bước tính; chỉ dùng thông tin có trong tài liệu."""
 
 # Câu trả lời khi tìm không ra ngữ cảnh đủ tin cậy: nói thẳng thay vì đoán (NFR-4).
 NO_CONTEXT_ANSWER = (

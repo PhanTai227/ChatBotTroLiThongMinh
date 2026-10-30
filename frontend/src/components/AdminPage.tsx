@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { History, KeyRound, Lock, MessageSquareHeart, ShieldCheck, Trash2, Unlock, UserCog, Users, X } from 'lucide-react';
+import { History, KeyRound, Lock, MessageSquareHeart, ShieldCheck, ThumbsDown, ThumbsUp, Trash2, Unlock, UserCog, Users, X } from 'lucide-react';
 import { apiRequest, type User } from '../lib/auth';
 import { StatCard } from './DashboardCards';
 
@@ -15,6 +15,17 @@ type FeedbackItem = {
   admin_reply: string | null;
   created_at: string;
   user_id: number;
+  full_name: string;
+  email: string;
+};
+
+type MessageRating = {
+  id: number;
+  message_id: number;
+  rating: 1 | -1;
+  question: string | null;
+  answer: string;
+  created_at: string;
   full_name: string;
   email: string;
 };
@@ -35,6 +46,7 @@ export function AdminPage() {
   const [error, setError] = useState('');
   const [maxUploadMb, setMaxUploadMb] = useState('20');
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
+  const [messageRatings, setMessageRatings] = useState<MessageRating[]>([]);
   const [replyingId, setReplyingId] = useState<number | null>(null);
   const [replyText, setReplyText] = useState('');
   const [historyUser, setHistoryUser] = useState<User | null>(null);
@@ -52,15 +64,17 @@ export function AdminPage() {
 
   const load = async () => {
     try {
-      const [userData, statData, settingData, feedbackData] = await Promise.all([
+      const [userData, statData, settingData, feedbackData, messageRatingData] = await Promise.all([
         apiRequest<User[]>('/api/admin/users'),
         apiRequest<Stats>('/api/admin/stats'),
         apiRequest<Setting[]>('/api/admin/settings'),
         apiRequest<{ items: FeedbackItem[] }>('/api/admin/feedback'),
+        apiRequest<{ items: MessageRating[] }>('/api/admin/message-feedback'),
       ]);
       setUsers(userData);
       setStats(statData);
       setFeedbacks(feedbackData.items);
+      setMessageRatings(messageRatingData.items);
       const uploadSetting = settingData.find((setting) => setting.key === 'max_upload_mb');
       if (uploadSetting) setMaxUploadMb(uploadSetting.value);
     } catch (requestError) {
@@ -154,6 +168,24 @@ export function AdminPage() {
         <div className="border-b border-line p-5 sm:p-6"><h2 className="section-title text-ink">Quản lý tài khoản</h2><p className="mt-1 text-xs text-muted">Khóa, đổi quyền hoặc đặt lại mật khẩu người dùng.</p></div>
         <div className="divide-y divide-line">
           {users.map((user) => <article key={user.id} className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center"><div className="grid size-10 shrink-0 place-items-center rounded-lg bg-accent-soft font-bold text-accent">{user.full_name.slice(0, 1).toUpperCase()}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-ink">{user.full_name}</p><span className={`pill ${user.role === 'admin' ? 'bg-accent-soft text-accent' : 'bg-[#efece3] text-muted'}`}>{user.role}</span><span className={`size-2 rounded-full ${user.is_active ? 'bg-emerald-500' : 'bg-rose-500'}`} /></div><p className="mt-1 text-xs text-muted">{user.email}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void openHistory(user)} className="btn btn-outline px-3 py-2 text-xs"><History size={14} />Lịch sử hỏi</button><select aria-label={`Vai trò ${user.email}`} value={user.role} onChange={(e) => void update(user, { role: e.target.value })} className="input w-auto px-3 py-2 text-xs font-semibold text-muted"><option value="user">User</option><option value="admin">Admin</option></select><button onClick={() => resetPassword(user)} className="btn btn-outline px-3 py-2 text-xs"><KeyRound size={14} />Đặt lại MK</button><button onClick={() => void update(user, { is_active: !user.is_active })} className={`btn px-3 py-2 text-xs ${user.is_active ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-accent-soft text-accent hover:bg-[#dde9e0]'}`}>{user.is_active ? <><Lock size={14} />Khóa</> : <><Unlock size={14} />Mở khóa</>}</button><button aria-label={`Xóa ${user.email}`} onClick={() => void deleteUser(user)} className="btn border border-rose-200 px-3 py-2 text-xs text-rose-600 hover:bg-rose-50"><Trash2 size={14} />Xóa</button></div></article>)}
+        </div>
+      </section>
+      <section className="card p-5 sm:p-6">
+        <h2 className="section-title text-ink">Đánh giá câu trả lời AI</h2>
+        <p className="mt-1 text-xs text-muted">Lượt thích và không thích gửi trực tiếp từ từng câu trả lời trong chatbot.</p>
+        <div className="mt-4 space-y-3">
+          {messageRatings.length === 0 && <p className="rounded-xl border border-dashed border-line bg-paper py-8 text-center text-sm text-muted">Chưa có đánh giá câu trả lời nào.</p>}
+          {messageRatings.map((item) => (
+            <article key={item.id} className="rounded-xl border border-line bg-paper p-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-ink">
+                {item.rating === 1 ? <ThumbsUp size={16} className="text-accent" /> : <ThumbsDown size={16} className="text-rose-600" />}
+                <span>{item.full_name}</span><span className="text-xs font-normal text-muted">{item.email}</span>
+              </div>
+              {item.question && <p className="mt-3 text-xs leading-5 text-muted"><strong>Câu hỏi:</strong> {item.question}</p>}
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink"><strong>Trả lời AI:</strong> {item.answer}</p>
+              <p className="mt-2 text-right text-[11px] text-muted">{new Date(`${item.created_at}Z`).toLocaleString('vi-VN')}</p>
+            </article>
+          ))}
         </div>
       </section>
       <section className="card p-5 sm:p-6">
